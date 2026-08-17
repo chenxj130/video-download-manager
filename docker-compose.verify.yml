@@ -1,0 +1,6 @@
+# 临时验证用覆盖：把容器 8787 映射到宿主 8799，避免与正在运行的生产实例(8787)冲突
+# 仅用于 docker compose 启动验证，不影响交付的 docker-compose.yml
+services:
+  vdm:
+    ports:
+      - "8799:8787"

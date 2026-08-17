@@ -1,0 +1,22 @@
+{
+  "name": "video-download-manager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "在线视频下载管理器 - 统一管理你的在线视频下载任务",
+  "scripts": {
+    "postinstall": "npm --prefix server install && npm --prefix web install",
+    "dev": "concurrently -n server,web -c blue,green \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm --prefix server run dev",
+    "dev:web": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "start": "npm --prefix server run start",
+    "typecheck": "npm --prefix server run typecheck && npm --prefix web run typecheck",
+    "test:api": "npm --prefix server run test:api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

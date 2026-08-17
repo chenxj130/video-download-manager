@@ -1,0 +1,42 @@
+# 显式指定项目名称：compose 默认用目录名(视频下载)消毒后为空，导致 "project name must not be empty"
+name: video-download-manager
+
+services:
+  vdm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: video-download-manager:1.0.0
+    container_name: vdm
+    restart: unless-stopped
+
+    ports:
+      # 宿主端口:容器端口。改宿主端口只需改左侧
+      - "8787:8787"
+
+    environment:
+      PORT: 8787
+      DATA_DIR: /app/data
+      DOWNLOAD_DIR: /app/downloads
+      WEB_DIST: /app/web/dist
+      # auto: 检测到 yt-dlp+ffmpeg 则真实下载，否则降级为模拟
+      DOWNLOAD_ENGINE: auto
+      MAX_CONCURRENT: 3
+      LOG_LEVEL: info
+
+    volumes:
+      # SQLite 数据库：持久化任务与设置，容器重建后可恢复
+      - ./data:/app/data
+      # 下载产物：直接落到宿主目录，方便取用
+      - ./downloads:/app/downloads
+
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
