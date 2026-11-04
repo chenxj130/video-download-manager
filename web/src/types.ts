@@ -202,4 +202,5 @@ export interface MitmProbe {
   suggestedName: string;
   suffix: string;
   isLocalSource: boolean;
+  isSharePage?: boolean;
 }

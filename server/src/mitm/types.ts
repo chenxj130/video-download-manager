@@ -46,6 +46,8 @@ export interface MitmProbeResult {
   suffix: string;
   /** 是否为本模块内置的确定性 CDN 源 */
   isLocalSource: boolean;
+  /** 是否为平台「分享页/落地页」URL（非直链，需抓包获取真实直链） */
+  isSharePage: boolean;
 }
 
 /** 单个下载器通道的运行状态 */

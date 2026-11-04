@@ -130,6 +130,14 @@ router.post(
     if (platform && platform !== 'unknown' && !(PLATFORM_KEYS as string[]).includes(platform)) {
       throw new ApiError('UNSUPPORTED_PLATFORM', '不支持的平台', 400);
     }
+    const probe = probeUrl(url);
+    if (probe.isSharePage) {
+      throw new ApiError(
+        'SHARE_PAGE_NOT_SUPPORTED',
+        '检测到这是平台分享页/落地页链接（如 weixin.qq.com/sph/...），不是可直接下载的视频直链。请通过 res-downloader 在客户端播放时抓包获取真实 .mp4 直链，或复制浏览器 Network 面板中的直链后粘贴。',
+        400
+      );
+    }
     const task = store.create({ url, platform, title, headers, source });
     res.status(201).json({ task });
   })

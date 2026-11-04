@@ -4,6 +4,25 @@
 
 ---
 
+## v1.1.1 — 分享页误判修复 + 桥接端到端验证（2026-11-04）
+
+### 修复（缺陷）
+- **MITM 分享页链接误判为直链**：`weixin.qq.com/sph/...` 等是视频号/抖音/小红书「分享落地页」URL（返回 `text/html`），原引擎当直链下载会把整页 HTML 存成 `.mp4` → 校验缺 `ftyp` → `VALIDATION_FAILED`。
+  - `server/src/mitm/platforms.ts`：新增 `SHARE_PAGE_PATTERNS`，识别三平台分享页/落地页 URL（`weixin.qq.com/sph/`、`channels.weixin.qq.com/finder-preview`、`douyin.com/video/`、`v.douyin.com/`、`xiaohongshu.com/explore/`、`xhslink.com/` 等）；`probeUrl` 标记 `isSharePage`。
+  - `server/src/mitm/router.ts`：`POST /api/mitm/tasks` 命中分享页直接返回 `400 SHARE_PAGE_NOT_SUPPORTED`，给出明确引导，不创建任务、不写假文件。
+  - `server/src/mitm/downloader.ts`：下载前做响应 `Content-Type` 预检（`text/html` / `application/json` / `text/plain` 等立即以可读原因失败），并对首块字节强校验兜底（防 `octet-stream` 伪装）。
+  - `server/src/types.ts`：注册 `SHARE_PAGE_NOT_SUPPORTED` 错误码。
+  - `web/src/pages/Mitm.tsx` + `web/src/types.ts`：前端新增「⚠ 分享页链接·非直链」红标 + 创建拦截 + 引导文案。
+
+### 验证
+- **桥接端到端实测**（详见 `MITM_E2E_BRIDGE_VERIFICATION.md`）：启动真实 `res-downloader`（v3.1.3，`:8899`）→ 项目桥接 `online=true` → `bridge/download` 委派解析 → 内置引擎实际下载微信直链 → 落地 `254794` 字节真实 MP4（ffprobe：h264+aac，可播放）。伪造 CDN 直链任务诚实返回 `failed`，无假成功。
+- 分享页 `sph` 链接现被 `400` 清晰拦截；三平台自检 `passed=true` 零回归。
+
+### 版本号
+`package.json` / `server/package.json` / `web/package.json` / `config.version` / `docker-compose.yml` 镜像 tag：`1.1.0` → `1.1.1`。
+
+---
+
 ## v1.1.0 — 第三方 MITM 嗅探下载接入层（2026-11-04）
 
 ### 新增功能

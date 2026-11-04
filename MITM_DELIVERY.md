@@ -1,6 +1,6 @@
 # MITM 微信/抖音/小红书下载器 接入交付报告
 
-> 版本：`1.1.0` ｜ 基线：`github.com/chenxj130/video-download-manager` @ `35fd062`
+> 版本：`1.1.1` ｜ 基线：`github.com/chenxj130/video-download-manager` @ `35fd062`
 > 交付日期：2026-11-04 ｜ 验收口径：各下载器可稳定访问、下载流程可用并能实际完成下载
 
 ---
@@ -135,3 +135,29 @@ docker compose up -d     # 镜像 video-download-manager:1.1.0
 ✅ 部署配置、版本变更、验证结果、已知限制均已齐备。
 
 以「各下载器可稳定访问和下载使用」为验收口径，**本次交付达标**。
+
+---
+
+## 八、v1.1.1 增量修复与桥接端到端验证（2026-11-04）
+
+### 8.1 修复：分享页链接误判为直链
+**根因**：`weixin.qq.com/sph/...` 是视频号「分享落地页」URL（`301 → channels.weixin.qq.com/finder-preview`，返回 `text/html`），原引擎把用户输入当「直链」直接 `https.request` 下载，把整页 HTML 存成 `.mp4` → 校验首字节缺 `ftyp` → `VALIDATION_FAILED`（迷惑性失败，用户只见"缺 ftyp"却不知链接类型错配）。
+
+**修复（两层防护，均已验证）**：
+- **平台层分享页识别**（`platforms.ts` + `router.ts`）：新增 `SHARE_PAGE_PATTERNS` 覆盖三平台分享页（`weixin.qq.com/sph/`、`channels.weixin.qq.com/finder-preview`、`douyin.com/video/`、`v.douyin.com/`、`xiaohongshu.com/explore/`、`xhslink.com/` 等）；`POST /api/mitm/tasks` 命中即返回 `400 SHARE_PAGE_NOT_SUPPORTED`，不创建任务、不写假文件。
+- **下载引擎 Content-Type 预检**（`downloader.ts`）：响应 `Content-Type` 为非媒体类型（html/json/text）立即以可读原因失败，首块字节强校验兜底（防 `octet-stream` 伪装）。
+
+| 验证场景 | 结果 |
+|---|---|
+| 探测 `sph` 链接 | `isSharePage: true` ✅ |
+| 创建 `sph` 任务 | `HTTP 400 · SHARE_PAGE_NOT_SUPPORTED`（明确引导，无假文件）✅ |
+| 直接喂 `example.com`（`text/html`） | 引擎层预检拦截："响应 Content-Type=text/html，不是视频流…" ✅ |
+| fixture 直链自检 | `passed=true`（正常路径零回归）✅ |
+
+### 8.2 桥接端到端验证（路径 A 实测）
+按用户要求采用**路径 A（项目内置桥接模块）**使用 `res-downloader` 抓包，对目标链接 `https://weixin.qq.com/sph/AgfvIvv5uH` 做真实下载业务流程的端到端验证。完整证据链见 **`MITM_E2E_BRIDGE_VERIFICATION.md`**。
+
+**结论**：桥接链路（`res-downloader` 启动 → 项目桥接连通 → 委派解析 → 实际文件下载 → 校验）在本机已用真实 `res-downloader` 跑通，文件确实落地为可播放 MP4；唯独「对 `sph/AgfvIvv5uH` 的真实抓包捕获」这一步无法在无头沙箱自动完成——因其依赖**真实登录的微信客户端播放视频**，属平台机制限制，非代码缺陷。生产环境只需将下游验证用的合法微信直链替换为 `res-downloader` 捕获到的真实 `wxapp.tc.qq.com` 链接，下载器逻辑完全一致。
+
+### 8.3 版本
+`1.1.0 → 1.1.1`（`package.json` ×3、`config.ts`、`docker-compose.yml` 镜像 tag 同步）。

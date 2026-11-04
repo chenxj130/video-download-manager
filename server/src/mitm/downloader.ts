@@ -185,11 +185,25 @@ export async function runMitmDownload(opts: MitmDownloadOptions): Promise<MitmVa
   const bodyErr = await collectErrorIfAny(res, status);
   if (bodyErr) throw new Error(bodyErr);
 
+  // 内容类型预检：分享页/落地页通常返回 text/html，直接拒绝并给出可读原因，
+  // 避免把网页写成 .mp4 后出现难以理解的「缺少 ftyp」校验失败。
+  const ctype = String(res.headers['content-type'] || '').toLowerCase().split(';')[0].trim();
+  const NON_MEDIA = ['text/html', 'application/json', 'text/plain', 'text/xml', 'application/xml', 'application/xhtml+xml'];
+  if (NON_MEDIA.includes(ctype)) {
+    res.resume(); // 丢弃响应体
+    throw new Error(
+      `响应 Content-Type=${ctype || '未知'}，不是视频流；该链接疑似分享页/落地页而非直链。` +
+      `请通过 res-downloader 在客户端播放时抓包获取真实 .mp4 直链，或复制浏览器 Network 面板中的直链后粘贴。`
+    );
+  }
+  const ctypeMedia = ctype !== '' && !NON_MEDIA.includes(ctype);
+
   const total = expected || Number(res.headers['content-length'] || 0) || 0;
   const partPath = `${targetPath}.part`;
   const started = Date.now();
   let downloaded = 0;
   let lastEmit = 0;
+  let firstChunkChecked = false;
 
   await new Promise<void>((resolve, reject) => {
     const ws = fs.createWriteStream(partPath);
@@ -204,6 +218,21 @@ export async function runMitmDownload(opts: MitmDownloadOptions): Promise<MitmVa
     // 手动写入并处理背压：避免同时挂 data 监听 + pipe 造成丢块
     res.on('data', (chunk: Buffer) => {
       if (signal.aborted) return fail(new MitmCancelError());
+      // 首块媒介特征强校验：当无媒体 Content-Type 时，若前导字节明显为文本/HTML/JSON，立即失败，
+      // 不再把非媒体内容写成 .mp4。仅做只读检查，不消费数据流。
+      if (!firstChunkChecked) {
+        firstChunkChecked = true;
+        if (!ctypeMedia) {
+          const hex = chunk.slice(0, 16).toString('hex');
+          const looksLikeText =
+            hex.startsWith('3c21444f') /* <!DO */ ||
+            hex.startsWith('3c68746d') /* <htm */ ||
+            hex.startsWith('3c3f786d') /* <?xm */ ||
+            hex.startsWith('7b22') /* {"  */ ||
+            hex.startsWith('7b27'); /* {'  */
+          if (looksLikeText) return fail(new Error(`响应内容疑似文本/HTML/JSON(${hex.slice(0, 16)})，不是视频流；该链接可能不是直链`));
+        }
+      }
       downloaded += chunk.length;
       if (maxBytes > 0 && downloaded > maxBytes) return fail(new Error('超出最大下载体积限制'));
       if (!ws.write(chunk)) res.pause();

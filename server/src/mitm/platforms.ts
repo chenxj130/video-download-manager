@@ -57,6 +57,44 @@ export function getAdapter(key: MitmPlatform): MitmPlatformAdapter {
   return ADAPTERS[key];
 }
 
+/**
+ * 分享页 / 落地页 URL 模式：这些是平台「网页分享链接」（如 weixin.qq.com/sph/...、
+ * douyin.com/video/...、xiaohongshu.com/explore/...），不是可直接 GET 的视频直链。
+ * 这类链接会 301 跳转到 HTML 页面或直接返回 HTML，直接下载只会拿到网页而非视频。
+ * 据此提前拦截并给出明确提示，引导用户改用 res-downloader 抓包得到的真实直链。
+ */
+const SHARE_PAGE_PATTERNS: Record<MitmPlatform, RegExp[]> = {
+  wechat: [
+    /weixin\.qq\.com\/sph\//i,
+    /channels\.weixin\.qq\.com\/finder-preview/i,
+    /channels\.weixin\.qq\.com\/.*\/sph/i,
+    /mp\.weixin\.qq\.com\/s\b/i,
+  ],
+  douyin: [
+    /douyin\.com\/video\//i,
+    /v\.douyin\.com\//i,
+    /iesdouyin\.com\/share\//i,
+  ],
+  xiaohongshu: [
+    /xiaohongshu\.com\/explore\//i,
+    /xiaohongshu\.com\/discovery\//i,
+    /xhslink\.com\//i,
+  ],
+};
+
+/** 检测是否为平台「分享页/落地页」而非直链；命中返回对应平台，否则 null */
+export function detectSharePage(rawUrl: string): MitmPlatform | null {
+  try {
+    const full = new URL(rawUrl).toString();
+    for (const key of PLATFORM_KEYS) {
+      if (SHARE_PAGE_PATTERNS[key].some((re) => re.test(full))) return key;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 /** 本地确定性 CDN 源的 URL 标记（用于识别 demo 直链） */
 export const FIXTURE_MARKER = '/api/mitm/fixture/';
 
@@ -111,6 +149,7 @@ export function safeFileName(name: string, maxLen = 60): string {
 export function probeUrl(rawUrl: string): MitmProbeResult {
   const platform = detectPlatform(rawUrl);
   const isLocalSource = rawUrl.includes(FIXTURE_MARKER);
+  const isSharePage = detectSharePage(rawUrl) !== null;
   if (platform === 'unknown') {
     return {
       platform: 'unknown',
@@ -120,6 +159,7 @@ export function probeUrl(rawUrl: string): MitmProbeResult {
       suggestedName: safeFileName('mitm-media'),
       suffix: '.mp4',
       isLocalSource,
+      isSharePage,
     };
   }
   const a = ADAPTERS[platform];
@@ -139,5 +179,6 @@ export function probeUrl(rawUrl: string): MitmProbeResult {
     suggestedName,
     suffix: a.suffix,
     isLocalSource,
+    isSharePage,
   };
 }

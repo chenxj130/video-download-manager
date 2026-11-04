@@ -48,6 +48,10 @@ export function Mitm() {
     }
     setCreating(true);
     try {
+      if (probe?.isSharePage) {
+        toast('这是平台分享页链接（如 weixin.qq.com/sph/...），不是视频直链，无法下载', 'error');
+        return;
+      }
       await api.mitm.createTask({
         url: url.trim(),
         platform: probe?.platform !== 'unknown' ? probe?.platform : undefined,
@@ -205,9 +209,18 @@ export function Mitm() {
             <Badge tone={probe.matched ? 'brand' : 'neutral'}>
               {probe.matched ? `识别：${probe.platformName}` : '未识别平台（按通用直链处理）'}
             </Badge>
-            <span className="text-slate-500 dark:text-slate-400">
-              自动携带 Referer / UA · {probe.isLocalSource ? '内置确定性源' : '外部直链'} · 后缀 {probe.suffix}
-            </span>
+            {probe.isSharePage ? (
+              <Badge tone="danger">⚠ 分享页链接 · 非直链</Badge>
+            ) : (
+              <span className="text-slate-500 dark:text-slate-400">
+                自动携带 Referer / UA · {probe.isLocalSource ? '内置确定性源' : '外部直链'} · 后缀 {probe.suffix}
+              </span>
+            )}
+            {probe.isSharePage && (
+              <span className="w-full text-rose-600 dark:text-rose-400">
+                这是平台分享/落地页（会跳转到 HTML 网页），不是视频直链，本引擎无法直接下载。请通过 res-downloader 在客户端播放时抓包获取真实 .mp4 直链，或复制浏览器 Network 面板中的直链后粘贴。
+              </span>
+            )}
           </div>
         )}
       </Card>

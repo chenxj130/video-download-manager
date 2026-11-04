@@ -51,7 +51,7 @@ export const config = {
   ),
   logLevel: (process.env.LOG_LEVEL ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
   requestTimeoutSeconds: Number(process.env.REQUEST_TIMEOUT ?? 60),
-  version: '1.1.0',
+  version: '1.1.1',
   /** MITM 嗅探下载接入层（与现有功能完全隔离） */
   mitm: {
     /** 是否启用接入层；默认开启 */
