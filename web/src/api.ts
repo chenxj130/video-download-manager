@@ -5,6 +5,12 @@ import type {
   Settings,
   SystemInfo,
   VideoMetadata,
+  MitmDownloader,
+  MitmProbe,
+  MitmStatus,
+  MitmTask,
+  MitmValidation,
+  MitmPlatform,
 } from './types';
 
 export class ApiRequestError extends Error {
@@ -109,4 +115,26 @@ export const api = {
   /** 打开任意允许目录（仅下载目录或任务保存目录） */
   openFolder: (path: string) =>
     request<{ ok: boolean }>('POST', '/system/open-folder', { path }),
+
+  // ===== v1.1.0 MITM 嗅探下载 =====
+  mitm: {
+    status: () => request<MitmStatus>('GET', '/mitm/status'),
+    downloaders: () => request<{ downloaders: MitmDownloader[] }>('GET', '/mitm/downloaders'),
+    probe: (url: string) => request<{ probe: MitmProbe; detected: string }>('POST', '/mitm/probe', { url }),
+    createTask: (payload: { url: string; platform?: string; title?: string; headers?: Record<string, string> }) =>
+      request<{ task: MitmTask }>('POST', '/mitm/tasks', payload),
+    tasks: () => request<{ tasks: MitmTask[] }>('GET', '/mitm/tasks'),
+    cancel: (id: string) => request<{ task: MitmTask }>('POST', `/mitm/tasks/${id}/cancel`),
+    retry: (id: string) => request<{ task: MitmTask }>('POST', `/mitm/tasks/${id}/retry`),
+    revalidate: (id: string) => request<{ validation: MitmValidation }>('POST', `/mitm/tasks/${id}/revalidate`),
+    deleteTask: (id: string, deleteFile = false) =>
+      request<{ ok: boolean }>('DELETE', `/mitm/tasks/${id}${deleteFile ? '?deleteFile=true' : ''}`),
+    streamUrl: (id: string) => `/api/mitm/tasks/${id}/stream`,
+    selftest: (platform: MitmPlatform) =>
+      request<{ platform: string; name: string; task: MitmTask; validation: MitmValidation; passed: boolean }>(
+        'POST', `/mitm/downloaders/${platform}/selftest`
+      ),
+    bridgeDownload: (url: string) =>
+      request<{ bridge: { accepted: boolean; error?: string }; localTask: MitmTask }>('POST', '/mitm/bridge/download', { url }),
+  },
 };

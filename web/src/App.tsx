@@ -5,6 +5,7 @@ import { Tasks } from './pages/Tasks';
 import { History } from './pages/History';
 import { Dashboard } from './pages/Dashboard';
 import { Settings } from './pages/Settings';
+import { Mitm } from './pages/Mitm';
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
           <Route path="/history" element={<History />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/mitm" element={<Mitm />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>

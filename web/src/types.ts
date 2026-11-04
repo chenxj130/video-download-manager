@@ -117,3 +117,89 @@ export interface SystemInfo {
 export interface ApiErrorBody {
   error: { code: string; message: string };
 }
+
+// ===== v1.1.0 MITM 嗅探下载接入层 =====
+export type MitmPlatform = 'wechat' | 'douyin' | 'xiaohongshu';
+export type MitmTaskStatus = 'waiting' | 'downloading' | 'completed' | 'failed' | 'cancelled';
+
+export interface MitmDownloader {
+  platform: MitmPlatform;
+  name: string;
+  color: string;
+  description: string;
+  adapterReady: boolean;
+  sourceReachable: boolean;
+  sourceHttpStatus: number | null;
+  demoUrl: string;
+  probeUrl: string;
+  latencyMs: number | null;
+  checkedAt: string;
+}
+
+export interface MitmValidation {
+  valid: boolean;
+  sizeMatches: boolean;
+  magicValid: boolean;
+  actualSize: number;
+  expectedSize: number;
+  headerHex: string;
+  ffprobe?: string;
+  reason?: string;
+}
+
+export interface MitmTask {
+  id: string;
+  url: string;
+  platform: MitmPlatform | 'unknown';
+  platformName: string;
+  title: string;
+  fileName: string;
+  filePath: string;
+  suffix: string;
+  status: MitmTaskStatus;
+  progress: number;
+  downloadedBytes: number;
+  fileSizeBytes: number;
+  speedBytesPerSec: number;
+  etaSeconds: number | null;
+  errorCode?: string;
+  errorMessage?: string;
+  source: 'fixture' | 'external' | 'bridge';
+  headers: Record<string, string>;
+  validation?: MitmValidation;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export interface MitmStatus {
+  ok: boolean;
+  module: string;
+  version: string;
+  enabled: boolean;
+  engine: { type: string; ready: boolean; maxConcurrent: number; timeoutMs: number; downloadDir: string };
+  fixture: { enabled: boolean; assetReady: boolean; assetPath: string | null; rangeSupported: boolean };
+  bridge: {
+    enabled: boolean;
+    online: boolean;
+    baseUrl: string;
+    appName?: string;
+    version?: string;
+    isProxy?: boolean;
+    latencyMs: number | null;
+    checkedAt: string;
+    error?: string;
+  };
+  platforms: { key: string; name: string; color: string }[];
+  time: string;
+}
+
+export interface MitmProbe {
+  platform: MitmPlatform | 'unknown';
+  platformName: string;
+  matched: boolean;
+  headers: Record<string, string>;
+  suggestedName: string;
+  suffix: string;
+  isLocalSource: boolean;
+}

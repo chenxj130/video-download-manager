@@ -4,7 +4,7 @@ type IconName =
   | 'home' | 'tasks' | 'history' | 'dashboard' | 'settings'
   | 'sun' | 'moon' | 'plus' | 'pause' | 'play'
   | 'close' | 'retry' | 'trash' | 'folder' | 'search'
-  | 'check' | 'alert' | 'drag' | 'wifi' | 'link' | 'chip' | 'gauge' | 'database' | 'disk';
+  | 'check' | 'alert' | 'drag' | 'wifi' | 'link' | 'chip' | 'gauge' | 'database' | 'disk' | 'radar';
 
 const paths: Record<IconName, JSX.Element> = {
   home: <path d="M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5" />,
@@ -41,6 +41,7 @@ const paths: Record<IconName, JSX.Element> = {
   gauge: <><path d="M12 14 16 9" /><path d="M3 18a9 9 0 1 1 18 0" /><circle cx="12" cy="14" r="1.5" /></>,
   database: <><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" /></>,
   disk: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="12" cy="13" r="3.5" /></>,
+  radar: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1.5" /><path d="M12 12 19 5" /></>,
 };
 
 export function Icon({

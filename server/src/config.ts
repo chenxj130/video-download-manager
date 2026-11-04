@@ -51,7 +51,26 @@ export const config = {
   ),
   logLevel: (process.env.LOG_LEVEL ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
   requestTimeoutSeconds: Number(process.env.REQUEST_TIMEOUT ?? 60),
-  version: '1.0.0',
+  version: '1.1.0',
+  /** MITM 嗅探下载接入层（与现有功能完全隔离） */
+  mitm: {
+    /** 是否启用接入层；默认开启 */
+    enabled: process.env.MITM_ENABLED !== '0',
+    /** 是否桥接真实第三方 res-downloader :8899；默认开启（不可达时自动降级） */
+    bridgeEnabled: process.env.MITM_BRIDGE !== '0',
+    bridgeUrl: process.env.MITM_BRIDGE_URL ?? 'http://127.0.0.1:8899',
+    /** 内置确定性 CDN 源开关（含演示直链）；默认开启 */
+    fixtureEnabled: process.env.MITM_FIXTURE !== '0',
+    /** MITM 下载产物独立目录，避免与现有任务产物混淆 */
+    downloadDir: resolveDir(process.env.MITM_DOWNLOAD_DIR ?? './downloads/mitm', ROOT),
+    /** 任务记录持久化文件 */
+    persistFile: path.join(resolveDataDir(process.env.DATA_DIR ?? './data'), 'mitm-tasks.json'),
+    maxConcurrent: Number(process.env.MITM_MAX_CONCURRENT ?? 3),
+    timeoutMs: Number(process.env.MITM_TIMEOUT_MS ?? 120000),
+    /** 本服务对外基址，用于拼接内置 fixture 演示直链 */
+    baseUrl: process.env.MITM_BASE_URL ?? `http://127.0.0.1:${Number(process.env.PORT ?? 8787)}`,
+    ffprobeBin: process.env.MITM_FFPROBE_PATH ?? 'ffprobe',
+  },
 };
 
 export function ensureDirs(): void {

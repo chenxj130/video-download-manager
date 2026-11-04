@@ -61,7 +61,13 @@ ENV NODE_ENV=production \
     WEB_DIST=/app/web/dist \
     DOWNLOAD_ENGINE=auto \
     MAX_CONCURRENT=3 \
-    LOG_LEVEL=info
+    LOG_LEVEL=info \
+    MITM_ENABLED=1 \
+    MITM_FIXTURE=1 \
+    MITM_BRIDGE=1 \
+    MITM_MAX_CONCURRENT=3 \
+    MITM_DOWNLOAD_DIR=/app/downloads/mitm \
+    MITM_BASE_URL=http://127.0.0.1:8787
 
 # 数据与下载目录必须挂载为卷，否则容器重建会丢失任务与文件
 RUN mkdir -p /app/data /app/downloads

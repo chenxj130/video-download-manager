@@ -6,7 +6,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: video-download-manager:1.0.0
+    image: video-download-manager:1.1.0
     container_name: vdm
     restart: unless-stopped
 
@@ -23,11 +23,22 @@ services:
       DOWNLOAD_ENGINE: auto
       MAX_CONCURRENT: 3
       LOG_LEVEL: info
+      # v1.1.0 MITM 接入层：容器内以 host.docker.internal 连接宿主桌面 res-downloader
+      MITM_ENABLED: 1
+      MITM_FIXTURE: 1
+      MITM_BRIDGE: 1
+      MITM_BRIDGE_URL: http://host.docker.internal:8899
+      MITM_BASE_URL: http://127.0.0.1:8787
+      MITM_DOWNLOAD_DIR: /app/downloads/mitm
+
+    # 允许容器内桥接宿主桌面的第三方 res-downloader（Linux 下必需）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
     volumes:
       # SQLite 数据库：持久化任务与设置，容器重建后可恢复
       - ./data:/app/data
-      # 下载产物：直接落到宿主目录，方便取用
+      # 下载产物：直接落到宿主目录，方便取用（含 mitm/ 子目录）
       - ./downloads:/app/downloads
 
     healthcheck:

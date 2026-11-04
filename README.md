@@ -125,6 +125,15 @@ docker compose down -v
 | `WEB_DIST` | `../web/dist` | 生产模式前端产物目录 |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `REQUEST_TIMEOUT` | `60` | 单次解析/下载请求超时（秒） |
+| `MITM_ENABLED` | `1` | v1.1.0 是否启用 MITM 接入层（0 关闭） |
+| `MITM_FIXTURE` | `1` | 内置确定性 CDN 源（验收/离线演示），默认开启 |
+| `MITM_BRIDGE` | `1` | 是否桥接真实第三方 res-downloader（不可达自动降级） |
+| `MITM_BRIDGE_URL` | `http://127.0.0.1:8899` | 第三方 res-downloader 地址 |
+| `MITM_DOWNLOAD_DIR` | `./downloads/mitm` | MITM 产物独立目录 |
+| `MITM_MAX_CONCURRENT` | `3` | MITM 任务并发数 |
+| `MITM_TIMEOUT_MS` | `120000` | MITM 单次下载超时（毫秒） |
+| `MITM_BASE_URL` | `http://127.0.0.1:8787` | 拼接演示直链用 |
+| `MITM_FFPROBE_PATH` | `ffprobe` | 产物双流校验工具 |
 
 示例见 `.env.example`（复制为 `.env` 后按需修改）。
 
@@ -147,6 +156,14 @@ docker compose down -v
 │   │   ├── platforms.ts      # URL 校验与平台识别
 │   │   ├── constants.ts      # 平台/分辨率/格式/状态字典
 │   │   ├── engine/           # 下载引擎（index 自动检测 + ytdlp + simulate）
+│   │   ├── mitm/             # v1.1.0 第三方 MITM 嗅探下载接入层
+│   │   │   ├── platforms.ts  #   微信/抖音/小红书 三平台适配器
+│   │   │   ├── downloader.ts #   无头直链下载引擎（HEAD→GET→流式→校验）
+│   │   │   ├── fixture.ts    #   内置确定性 CDN 源（Range + 防盗链）
+│   │   │   ├── bridge.ts     #   可选桥接 res-downloader :8899
+│   │   │   ├── store.ts      #   任务存储/调度（JSON 持久化，独立于 SQLite）
+│   │   │   ├── router.ts     #   /api/mitm 路由
+│   │   │   └── assets/       #   demo.mp4 真实可播放演示资源
 │   │   ├── routes/           # /api 各路由
 │   │   ├── services/         # taskManager 任务编排
 │   │   ├── utils/            # errors / file / format / logger
@@ -155,7 +172,7 @@ docker compose down -v
 │   └── package.json
 └── web/                      # 前端
     ├── src/
-    │   ├── pages/            # Dashboard / Tasks / History / Home / Settings
+    │   ├── pages/            # Dashboard / Tasks / History / Home / Settings / Mitm
     │   ├── components/       # Layout / EngineBanner / charts / ui
     │   ├── api.ts            # API 客户端
     │   ├── context/          # ThemeContext
@@ -216,6 +233,26 @@ docker compose down -v
 | GET | `/api/settings` | 读取设置 |
 | PUT | `/api/settings` | 更新设置，允许字段：`defaultQuality, defaultFormat, maxConcurrent, defaultSaveDir, maxSpeedBytesPerSec, requestTimeoutSeconds, autoRetryCount, theme` |
 
+### MITM 嗅探下载（v1.1.0）
+
+基地址 `/api/mitm`，与现有任务系统完全隔离。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/mitm/status` | 模块状态：无头引擎、确定性源、第三方桥接 online/offline、三平台清单 |
+| GET | `/api/mitm/downloaders` | 三个下载器通道 + 真实 HTTP 可达性探测（含演示直链） |
+| POST | `/api/mitm/probe` | `{ url }` → 识别平台、返回自动携带的 Referer/UA 头 |
+| POST | `/api/mitm/tasks` | `{ url, platform?, title?, headers? }` 创建嗅探下载任务 |
+| GET | `/api/mitm/tasks` / `/api/mitm/tasks/:id` | 任务列表 / 详情（含进度、产物校验） |
+| GET | `/api/mitm/tasks/:id/stream` | 播放已完成产物（支持 Range 206） |
+| POST | `/api/mitm/tasks/:id/cancel` / `retry` / `revalidate` | 取消 / 重试 / 重新校验产物 |
+| DELETE | `/api/mitm/tasks/:id?deleteFile=true` | 删除任务（可选删文件） |
+| POST | `/api/mitm/downloaders/:platform/selftest` | **一键端到端验收**：真实下载一次并校验 magic/size/ffprobe |
+| GET | `/api/mitm/fixture/:platform/probe` | 单下载器轻量探测 |
+| GET | `/api/mitm/fixture/:platform/media.mp4` | 确定性 CDN 源（需正确 Referer，支持 Range） |
+| GET | `/api/mitm/bridge/status` / `config` | 第三方 res-downloader 桥接状态 / 配置 |
+| POST | `/api/mitm/bridge/download` | `{ url }` 委派第三方，并同时落一条内置引擎任务保证完成 |
+
 ### 任务状态枚举
 
 `waiting`（等待中）· `parsing`（解析中）· `downloading`（下载中）· `paused`（已暂停）· `completed`（已完成）· `failed`（失败）· `cancelled`（已取消）
@@ -261,3 +298,48 @@ A: 前端是 SPA，需经 HTTP 访问（开发 `npm run dev` 或生产 `npm star
 
 **Q: X/Twitter 下载到一半报 `SAFE_DELETE_BLOCKED` 或 `解析失败：yt-dlp exited 1`？**
 A: 某些安全沙箱会限制单个进程/轮次内累计删除 ≥50 个文件，而 X 的 HLS 流会产生大量 `.part-Frag*` 临时分片。启动时加上 `YTDLP_KEEP_FRAGMENTS=1` 即可保留分片、避免触发拦截。普通桌面/终端/Docker 环境无需开启，保持下载目录更干净。
+
+---
+
+## 第三方 MITM 嗅探下载（v1.1.0）
+
+新增「资源嗅探」页面（`/mitm`），接入第三方 MITM 下载器能力，覆盖**微信视频号 / 抖音 / 小红书**三个独立下载器通道。
+与原有 YouTube/Bilibili 等 yt-dlp 体系**完全隔离**：独立命名空间 `/api/mitm`、独立产物目录 `downloads/mitm`、独立 JSON 任务存储，不影响任何现有功能。
+
+### 架构（为什么这样做）
+
+第三方 `res-downloader` 是 **Wails 桌面 GUI 应用**，其官方「代理嗅探」依赖三样东西：GUI 窗口 + 系统 CA 根证书信任 + 微信/抖音客户端产生的真实网络流量。这三者无法在服务端/无头/Docker 环境里凭空产生，且装全局 CA 有安全风险。因此本接入层采用**双轨**：
+
+1. **无头直链下载引擎（主交付）**：用 Node 原生 `http/https` 复刻该下载器的 `HEAD→GET→分片写盘` 机制，但不依赖 Wails GUI 主循环，可常驻服务端进程，因而**能真正完成下载**。三平台适配器自动带上正确的 `Referer`/`User-Agent`（对齐平台 CDN 防盗链规则）。
+2. **可选桥接（增强）**：桌面端若运行着 `res-downloader`（默认 `127.0.0.1:8899`），`/api/mitm/bridge/*` 会探测其 `app-info`/`get-config` 并委派下载；**不可达时自动降级为 offline，不影响主流程**。桥接仅做只读探测 + 直链委派，绝不触碰系统代理开关与 CA 安装。
+3. **内置确定性 CDN 源**：一个真实的 4 秒 H.264+AAC `demo.mp4`，支持 `Range 206` + 逐平台防盗链校验。用于**可重复、离线、不依赖外网**的端到端验收与演示 —— 下载引擎必须带对平台请求头才能取到完整文件。
+
+> 合规：仅处理你自己有权访问的公开/自有资源直链，不实现任何 DRM 破解、登录/付费墙/访问控制绕过。
+
+### 快速验证（三平台各真实下载一次）
+
+```bash
+npm run start                     # 单端口 8787
+# 三个下载器通道的真实 HTTP 可达性
+curl http://localhost:8787/api/mitm/downloaders
+# 每个通道独立自检：真实下载 + magic/size/ffprobe 校验，返回 passed:true
+for p in wechat douyin xiaohongshu; do
+  curl -X POST http://localhost:8787/api/mitm/downloaders/$p/selftest
+done
+```
+
+浏览器打开 `http://localhost:8787/mitm`：三张下载器卡片可点「演示直链」（一键填入）或「自检」；也可粘贴真实资源直链后「开始下载」，任务列表实时显示进度、可播放/取消/重试/删除。
+
+### 部署配置
+
+见 `.env.example` 的 `MITM_*` 段、`docker-compose.yml` 与 `Dockerfile` 的 MITM 环境变量。Docker 场景：
+- 内置引擎与确定性源**开箱即用**（镜像已含 `ffmpeg/ffprobe` 与 `demo.mp4`）。
+- 若要桥接宿主桌面的第三方 `res-downloader`，compose 已加 `extra_hosts: host.docker.internal:host-gateway` 及 `MITM_BRIDGE_URL`。
+
+### 已知限制
+
+- 真实「GUI 代理嗅探自动抓流」仍需桌面端运行 `res-downloader` 并装 CA、开系统代理；服务端提供的是其**无头等价直链下载内核**与**可选桥接**，不是 GUI 自动化。
+- 平台直链普遍带时效签名（`encfilekey`/`token`/`X-snsvideoflag` 等），过期或被防盗链拦截会返回明确错误（403/404），需重新嗅探获取新直链。
+- 内置确定性源用于验收/演示；生产真实下载请把 URL 换成你有权访问的资源直链（请求头可由 `/api/mitm/probe` 自动推断，或手动传 `headers`，如带 Cookie）。
+
+详细实现、验证结果与限制见 `MITM_DELIVERY.md` 与 `CHANGELOG.md`。

@@ -1,6 +1,6 @@
 {
   "name": "video-download-manager",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "在线视频下载管理器 - 统一管理你的在线视频下载任务",
   "scripts": {

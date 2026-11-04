@@ -11,6 +11,8 @@ web/dist/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+# v1.1.0 MITM 任务记录（运行时生成，含自检临时任务，不入库）
+data/mitm-tasks.json
 downloads/*
 !downloads/.gitkeep
 

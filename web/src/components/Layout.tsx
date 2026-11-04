@@ -14,6 +14,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/', label: '首页', icon: 'home' },
   { to: '/tasks', label: '下载任务', icon: 'tasks' },
+  { to: '/mitm', label: '资源嗅探', icon: 'radar' },
   { to: '/history', label: '下载历史', icon: 'history' },
   { to: '/dashboard', label: '数据看板', icon: 'dashboard' },
   { to: '/settings', label: '设置', icon: 'settings' },
@@ -22,6 +23,7 @@ const NAV: NavItem[] = [
 const TITLES: Record<string, string> = {
   '/': '在线视频下载管理器',
   '/tasks': '下载任务',
+  '/mitm': '资源嗅探下载',
   '/history': '下载历史',
   '/dashboard': '数据看板',
   '/settings': '设置',
