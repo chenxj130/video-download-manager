@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -13,6 +13,22 @@ import type {
 import { ApiError, mapEngineError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { AbortError, type DownloadContext, type DownloadHandle, type VideoEngine } from './simulate.js';
+
+/**
+ * 把命令名解析为绝对路径。
+ * 关键修复：yt-dlp 的合并后处理器在 `--ffmpeg-location` 收到裸命令名（如 "ffmpeg"）时，
+ * 在其子进程上下文里往往解析不到可执行文件，导致合并步骤被静默跳过（退出码仍 0），
+ * 只留下 DASH 分离的视频/音频分流文件。传绝对路径可确保合并必然触发。
+ */
+function resolveBin(name: string): string {
+  if (path.isAbsolute(name)) return name;
+  try {
+    const found = execSync(`command -v ${JSON.stringify(name)}`, { encoding: 'utf8' }).trim();
+    return found || name;
+  } catch {
+    return name;
+  }
+}
 
 /** 仅当系统已安装 yt-dlp + ffmpeg 时使用的真实下载引擎 */
 export class YtDlpEngine implements VideoEngine {
@@ -168,7 +184,7 @@ class YtDlpDownload implements DownloadHandle {
         '--newline',
         '--no-warnings',
         '--ffmpeg-location',
-        config.ffmpegBin,
+        resolveBin(config.ffmpegBin),
         // HLS(m3u8) 流改用 ffmpeg 拉取，比默认 hlsnative 容错更强，避免分片中断导致整段失败（X/Twitter 尤为明显）
         '--hls-prefer-ffmpeg',
         '--progress-template',
@@ -206,7 +222,7 @@ class YtDlpDownload implements DownloadHandle {
       '--newline',
       '--no-warnings',
       '--ffmpeg-location',
-      config.ffmpegBin,
+      resolveBin(config.ffmpegBin),
       // 用确定性模板输出进度，避免解析人类可读文本时因语言/单位差异失配。
       // yt-dlp 的进度默认写入 stdout，下方同时监听 stdout 与 stderr。
       '--progress-template',
@@ -225,7 +241,7 @@ class YtDlpDownload implements DownloadHandle {
   private runWithArgs(args: string[], target: string): Promise<{ filePath: string; fileSizeBytes: number }> {
     const { task, signal, onProgress } = this.ctx;
     return new Promise((resolve, reject) => {
-      const proc = spawn(config.ytdlpBin, args, { windowsHide: true });
+      const proc = spawn(resolveBin(config.ytdlpBin), args, { windowsHide: true });
       let total = task.fileSizeBytes || 0;
       let downloaded = 0;
       const onAbort = () => proc.kill('SIGTERM');
@@ -254,19 +270,101 @@ class YtDlpDownload implements DownloadHandle {
         onProgress(p);
       };
       proc.on('error', (e) => reject(e));
-      proc.on('close', (code) => {
+      proc.on('close', async (code) => {
         signal.removeEventListener('abort', onAbort);
         if (signal.aborted) return reject(new AbortError());
-        if (code === 0) {
-          const size = fs.existsSync(target) ? fs.statSync(target).size : downloaded;
-          resolve({ filePath: target, fileSizeBytes: size });
-        } else {
+        if (code !== 0) {
           const tail = errOutput.trim().split(/\r?\n/).slice(-8).join('\n') || '(无 stderr)';
           logger.error(`yt-dlp 失败 (exit ${code})，任务=${task.id}\n${tail}`);
-          reject(new Error(`yt-dlp exited ${code}: ${tail}`));
+          return reject(new Error(`yt-dlp exited ${code}: ${tail}`));
         }
+
+        // 关键校验：退出码 0 不代表真正产出文件（DASH 合并可能被静默跳过）。
+        if (!fs.existsSync(target)) {
+          const merged = await this.fallbackMerge(target).catch(() => false);
+          if (!merged) {
+            this.cleanupFragments(target);
+            return reject(
+              new Error(
+                `下载完成但未生成合并文件 ${path.basename(target)}：DASH 音视频流合并失败（ffmpeg 不可达），请确认 ffmpeg 已安装并在 PATH 中`
+              )
+            );
+          }
+        }
+        // 成功：清理 yt-dlp 遗留的分流碎片（.f<fmt>.mp4 / .f<fmt>.m4a 等）
+        this.cleanupFragments(target);
+        const size = fs.statSync(target).size;
+        resolve({ filePath: target, fileSizeBytes: size });
       });
     });
+  }
+
+  /** 合并被跳过时，用 ffmpeg 直接合并目录中遗留的视频/音频分流碎片 */
+  private async fallbackMerge(target: string): Promise<boolean> {
+    const base = target.slice(0, target.lastIndexOf('.'));
+    const dir = path.dirname(target);
+    let entries: string[] = [];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      return false;
+    }
+    const frags = entries
+      .filter((f) => f.startsWith(path.basename(base) + '.f'))
+      .map((f) => path.join(dir, f));
+    if (frags.length < 2) return false;
+
+    const ff = resolveBin(config.ffmpegBin);
+    const ffprobe = resolveBin('ffprobe');
+    const classify = (file: string): 'video' | 'audio' | null => {
+      try {
+        const out = execSync(
+          `"${ffprobe}" -v error -show_entries stream=codec_type -of csv=p=0 "${file}"`,
+          { encoding: 'utf8' }
+        );
+        if (out.includes('video')) return 'video';
+        if (out.includes('audio')) return 'audio';
+      } catch {
+        /* ignore */
+      }
+      return null;
+    };
+    const video = frags.find((f) => classify(f) === 'video');
+    const audio = frags.find((f) => classify(f) === 'audio' && f !== video);
+    if (!video) return false;
+    const inputs = audio ? [video, audio] : [video];
+    const cmd = [
+      ff,
+      '-y',
+      ...inputs.flatMap((f) => ['-i', f]),
+      '-c',
+      'copy',
+      '-movflags',
+      '+faststart',
+      target,
+    ];
+    try {
+      execSync(cmd.map((c) => JSON.stringify(c)).join(' '), { stdio: 'ignore' });
+      return fs.existsSync(target) && fs.statSync(target).size > 0;
+    } catch (e) {
+      logger.error(`兜底合并失败，任务=${this.ctx.task.id}: ${(e as Error).message}`);
+      return false;
+    }
+  }
+
+  /** 删除 yt-dlp 遗留的分流碎片文件 */
+  private cleanupFragments(target: string): void {
+    const base = target.slice(0, target.lastIndexOf('.'));
+    const dir = path.dirname(target);
+    try {
+      for (const f of fs.readdirSync(dir)) {
+        if (f.startsWith(path.basename(base) + '.f')) {
+          fs.rmSync(path.join(dir, f), { force: true });
+        }
+      }
+    } catch {
+      /* ignore */
+    }
   }
 }
 

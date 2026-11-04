@@ -40,7 +40,9 @@
 
 ## 环境要求
 
-- Node.js ≥ 18（推荐 22）
+- Node.js **18–24**（推荐 22.22.2）
+  - ⚠️ **不要使用 Node 26+**：`better-sqlite3` 原生模块目前不兼容 Node 26 的 V8 API，启动会报 `ERR_DLOPEN_FAILED` / `Could not locate the bindings file`。
+  - 若系统默认是 Homebrew 安装的 Node 26，项目已自动通过 `scripts/env.sh` 切换到 WorkBuddy 托管的 Node 22.22.2，并补充 yt-dlp/ffmpeg 常见路径，无需手动切换。
 - 真实下载需安装 `yt-dlp` 与 `ffmpeg` 并可在 PATH 中找到（或用环境变量指定绝对路径）
 - 可选：Docker / Docker Compose（用于容器化部署）
 
@@ -250,6 +252,9 @@ A: 早期 `Number(v) || 3` 把 `0` 当 falsy 误判为「未提供」。已改�
 
 **Q: Docker 报 `project name must not be empty`？**
 A: 项目目录含中文名，compose 消毒后项目名为空。已在 `docker-compose.yml` 顶部加 `name: video-download-manager` 显式指定。
+
+**Q: 启动时报 `ERR_DLOPEN_FAILED` / `was compiled against a different Node.js version` / `Could not locate the bindings file`？**
+A: 系统默认 Node 与 `better-sqlite3` 原生模块不兼容。本项目已在 `package.json` 脚本中强制使用 WorkBuddy 托管的 Node 22.22.2；若仍报错，执行 `cd server && npm rebuild better-sqlite3` 重新编译即可。根本解决：避免使用 Node 26+ 运行本项目。
 
 **Q: 直接双击打开前端页面白屏？**
 A: 前端是 SPA，需经 HTTP 访问（开发 `npm run dev` 或生产 `npm start`），不能用 `file://` 打开。

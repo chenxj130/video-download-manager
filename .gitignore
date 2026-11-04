@@ -32,3 +32,7 @@ Thumbs.db
 
 # 项目内部记忆（含工作日志/个人笔记，避免推到远端仓库）
 .workbuddy/
+
+# 非本项目的无关目录/文件（误置于此目录，切勿提交）
+res-downloader/
+ISOLATION_PLAN.md

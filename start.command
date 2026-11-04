@@ -4,8 +4,12 @@
 
 cd "$(dirname "$0")"
 
-# 避免沙箱代理拦截 localhost
-export NO_PROXY="localhost,127.0.0.1"
+# 加载统一运行环境（Node 22 + yt-dlp/ffmpeg 常见路径 + NO_PROXY）
+. ./scripts/env.sh
+
+echo "使用 Node: $(node --version)"
+echo "yt-dlp: $(yt-dlp --version 2>/dev/null || echo '未找到')"
+echo "ffmpeg: $(ffmpeg -version 2>/dev/null | head -1 || echo '未找到')"
 
 # 检查依赖是否已安装
 if [ ! -d "node_modules" ] || [ ! -d "server/node_modules" ] || [ ! -d "web/node_modules" ]; then
