@@ -77,6 +77,8 @@ export const api = {
   resume: (id: string) => request<{ task: DownloadTask }>('POST', `/tasks/${id}/resume`),
   cancel: (id: string) => request<{ task: DownloadTask }>('POST', `/tasks/${id}/cancel`),
   retry: (id: string) => request<{ task: DownloadTask }>('POST', `/tasks/${id}/retry`),
+  repair: (id: string) =>
+    request<{ task: DownloadTask }>('POST', `/tasks/${id}/repair`),
   deleteTask: (id: string, deleteFile = false) =>
     request<{ ok: boolean }>('DELETE', `/tasks/${id}${deleteFile ? '?deleteFile=true' : ''}`),
   deleteFile: (id: string) =>

@@ -4,6 +4,50 @@
 
 ---
 
+## v1.1.2 — 下载后无法播放根因修复：AV1 编码规避 + 媒体探测/自动修复（2026-11-04）
+
+### 问题现象
+- 部分下载完成的视频（典型为 YouTube 高分辨率档）在 QuickTime Player 弹出「此文件包含一些 QuickTime 无法播放的媒体」而**无法播放**；部分默认浏览器亦无法解码。
+- 文件本身完整（约 44 MB、结构合法），`ffprobe` 显示容器 `mp4`、视频编码 `av1`、音频 `aac`、1920×1080。
+- 下载目录遗留多对 `.fhls-*.mp4`(视频) + `.fhls-audio-*.mp4`(音频) 分片，均为未合并的 HLS 分段，单独打开亦不可播。
+- 后端终端偶见 `EADDRINUSE`（8787 端口被重复实例占用，属服务可用性问题，与文件播放无直接因果）。
+
+### 根因结论
+1. **主因（编码/播放环境不兼容）**：`server/src/engine/ytdlp.ts` 的格式选择表达式 `bv*[height<=N][ext=mp4]+ba...` **未对视频编码做过滤**，`bv*` 会命中平台提供的 AV1(`av01`) 封装 MP4 流。AV1 在 MP4 容器内结构合法，但 QuickTime 与多数默认浏览器解码器不支持 → 表现为「文件不兼容」。模拟引擎（`simulate.ts`）使用 `libx264` 输出 H.264，故不受此影响，根因锁定在真实 yt-dlp 引擎路径。
+2. **次因（分片未合并）**：HLS(`.fhls-*`) 视频/音频分片在某些来源下未被 ffmpeg 合并，遗留为不可播的独立文件。
+3. **异常处理的缺口**：原实现仅做「退出码 0 + 文件存在性」校验，**不探测编码/可播放性**，因此即便下到不可播文件也记为 `completed`，前端无任何告警与补救入口。
+
+### 修复内容
+- **`server/src/engine/ytdlp.ts`**：将格式选择抽取为 `buildFormatSelector(height, ext)`。mp4/mov **优先 H.264(`avc1`)**、逐级排除 `av01`/`vp9`，最后才兜底（兜底命中 av01 时由下方自动修复兜底）；webm 保留 VP9/AV1（浏览器原生支持）。从下载源头规避 AV1-in-MP4。
+- **`server/src/utils/media.ts`（新增）**：
+  - `probeMedia()`：用 `ffprobe` 读取容器/视频编码/音频编码/分辨率/时长，经 `isPlayerCompatible()` 判定能否被 QuickTime+主流浏览器直接解码。
+  - `repairToH264()`：用 `ffmpeg` 将不兼容文件转码为 **H.264+AAC 的 MP4**（最通用可播放格式），保留原文件为 `<name>.original.<ext>`。
+- **`server/src/services/taskManager.ts`**：
+  - `onComplete()` 下载后**自动探测媒体信息**并写入任务；当 `playerCompatible===false` 且 `config.autoRepairIncompatible` 为真时**自动转码修复**，从源头消除复现。
+  - 新增 `repair(id)` 手动修复方法（已完成且编码不兼容的任务可一键转码）。
+- **`server/src/routes/tasks.ts`**：新增 `POST /api/tasks/:id/repair`。
+- **数据层 `server/src/types.ts` + `server/src/db.ts` + `web/src/types.ts`**：`DownloadTask` 增加 `media?: TaskMedia`（编码/容器/可播放性/是否已修复）；`tasks` 表 `ALTER` 增加 `media TEXT` 列（JSON，旧库安全补齐），并完成行映射。
+- **前端 `web/src/api.ts`**：新增 `api.repair(id)`；`web/src/components/icons.tsx` 新增 `wrench` 图标；`web/src/pages/Tasks.tsx` 与 `History.tsx`：已完成且不兼容时显示 **⚠ 编码不兼容** 告警徽标 + **「修复」** 按钮（转码为 H.264 可播放格式），并展示视频编码标签。
+
+### 优化项（下载校验与播放异常处理）
+- 下载校验从「退出码 + 文件存在」升级为 **「编码级可播放性探测」**，不可播文件不再被记为静默成功。
+- **双重防护**：格式选择规避（治本）+ 下载后自动修复（兜底），即使个别来源仅提供 AV1 也能产出可播放文件。
+- 前端提供明确的**不兼容告警 + 一键修复**入口，用户无需懂编码即可补救历史已下载文件。
+- 新增配置开关 `AUTO_REPAIR_INCOMPATIBLE`（默认开启，设 `0` 仅标记不转码）与 `FFPROBE_PATH`（探测用 ffprobe 路径）。
+
+### 验证结果
+- **类型检查**：`npm run typecheck`（server + web）全部通过。
+- **真实文件探测**：对 `downloads/` 中真实故障文件 `ffprobe` 经 `probeMedia()` 返回
+  `{container:"mp4", videoCodec:"av1", audioCodec:"aac", width:1920, height:1080, durationSeconds:639.3, playerCompatible:false}`，告警文案正确。
+- **修复链路**：截取该 AV1 文件 5s 片段（仍为 `av1/mp4, playerCompatible:false`）→ `repairToH264()` 转码 → 复探为 `{videoCodec:"h264", audioCodec:"aac", playerCompatible:true}`，验证 AV1→H.264 修复闭环可用。
+- **服务启动**：`npm run start` 正常启动（引擎 `ytdlp`），历史任务正常加载，`POST /api/tasks/:id/repair` 路由注册正确、未知任务返回 `404 TASK_NOT_FOUND`。
+- **已知权衡**：软件解码 AV1 转码较慢（44MB 1080p 约需数十分钟），但格式选择已优先规避 AV1，自动修复极少触发；如介意可在 `.env` 设 `AUTO_REPAIR_INCOMPATIBLE=0` 仅标记不转码。
+
+### 版本号
+`package.json` / `server/package.json` / `web/package.json` / `config.version` / `docker-compose.yml` 镜像 tag：`1.1.1` → `1.1.2`。
+
+---
+
 ## v1.1.1 — 分享页误判修复 + 桥接端到端验证（2026-11-04）
 
 ### 修复（缺陷）

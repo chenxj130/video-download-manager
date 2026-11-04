@@ -45,13 +45,21 @@ export const config = {
    * 默认 false；设为 1 开启。开启后片段不会自动清理，需定期手动清理下载目录。
    */
   ytdlpKeepFragments: process.env.YTDLP_KEEP_FRAGMENTS === '1',
+  /**
+   * 下载完成后是否自动探测媒体编码，并对不兼容编码（典型为 AV1/VP9 封装在 MP4/MKV 中，
+   * QuickTime 与多数默认播放器无法解码）自动转码为 H.264+AAC。
+   * 默认开启；设为 0 则仅标记不兼容、不自动转码（可在前端手动点击「修复」）。
+   */
+  autoRepairIncompatible: process.env.AUTO_REPAIR_INCOMPATIBLE !== '0',
+  /** ffprobe 可执行文件：可为命令名（走 PATH）或绝对路径，用于下载后媒体编码探测 */
+  ffprobeBin: process.env.FFPROBE_PATH ?? 'ffprobe',
   webDist: resolveDir(
     process.env.WEB_DIST ?? '../web/dist',
     SERVER_DIR
   ),
   logLevel: (process.env.LOG_LEVEL ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
   requestTimeoutSeconds: Number(process.env.REQUEST_TIMEOUT ?? 60),
-  version: '1.1.1',
+  version: '1.1.2',
   /** MITM 嗅探下载接入层（与现有功能完全隔离） */
   mitm: {
     /** 是否启用接入层；默认开启 */

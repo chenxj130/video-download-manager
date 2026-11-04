@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { paths } from './config.js';
 import { logger } from './utils/logger.js';
-import type { DownloadTask, Settings } from './types.js';
+import type { DownloadTask, Settings, TaskMedia } from './types.js';
 
 fs.mkdirSync(path.dirname(paths.dbFile), { recursive: true });
 
@@ -45,6 +45,13 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_platform ON tasks(platform);
 `);
+
+// 1.1.2 新增：下载后媒体探测信息（编码/容器/可播放性）。旧库可能无该列，安全补齐。
+try {
+  db.exec('ALTER TABLE tasks ADD COLUMN media TEXT');
+} catch {
+  // 列已存在则忽略（better-sqlite3 在列已存在时会抛错）
+}
 
 const DEFAULT_SETTINGS: Settings = {
   defaultQuality: '1080p',
@@ -126,7 +133,28 @@ export function rowToTask(row: Record<string, unknown>): DownloadTask {
     updatedAt: row.updated_at as string,
     startedAt: (row.started_at as string) || undefined,
     completedAt: (row.completed_at as string) || undefined,
+    media: parseMedia(row.media),
   };
+}
+
+/** 解析 media 列（JSON 文本）；为空或解析失败返回 undefined */
+function parseMedia(value: unknown): TaskMedia | undefined {
+  if (value == null || value === '') return undefined;
+  try {
+    const obj = JSON.parse(String(value));
+    return obj && typeof obj === 'object' ? (obj as TaskMedia) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function serializeMedia(media?: TaskMedia): string | null {
+  if (!media) return null;
+  try {
+    return JSON.stringify(media);
+  } catch {
+    return null;
+  }
 }
 
 const insertStmt = db.prepare(`
@@ -135,13 +163,13 @@ INSERT INTO tasks (
   duration_seconds, resolution, format, save_dir, file_name, file_path,
   file_size_bytes, downloaded_bytes, speed_bytes_per_sec, status,
   error_code, error_message, progress, eta_seconds, retry_count,
-  created_at, updated_at, started_at, completed_at
+  created_at, updated_at, started_at, completed_at, media
 ) VALUES (
   @id, @url, @platform, @platformName, @title, @author, @thumbnailUrl,
   @durationSeconds, @resolution, @format, @saveDir, @fileName, @filePath,
   @fileSizeBytes, @downloadedBytes, @speedBytesPerSec, @status,
   @errorCode, @errorMessage, @progress, @etaSeconds, @retryCount,
-  @createdAt, @updatedAt, @startedAt, @completedAt
+  @createdAt, @updatedAt, @startedAt, @completedAt, @media
 )
 `);
 
@@ -174,6 +202,7 @@ export function insertTask(task: DownloadTask): void {
     updatedAt: task.updatedAt ?? now,
     startedAt: task.startedAt ?? null,
     completedAt: task.completedAt ?? null,
+    media: serializeMedia(task.media),
   });
 }
 
@@ -219,6 +248,7 @@ export function updateTask(task: DownloadTask): void {
     updatedAt: task.updatedAt ?? now,
     startedAt: task.startedAt ?? null,
     completedAt: task.completedAt ?? null,
+    media: serializeMedia(task.media),
   });
 }
 

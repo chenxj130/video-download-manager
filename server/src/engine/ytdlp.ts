@@ -127,6 +127,46 @@ function normalizeResolution(height?: number): Resolution | null {
   return best;
 }
 
+/**
+ * 构造 yt-dlp 格式选择表达式，规避「下载后无法播放」的根因：
+ * 部分平台（YouTube 高分辨率档等）会优先提供 AV1(av01) 编码的 MP4 流，
+ * 在 MP4/MKV 容器中结构合法，但 QuickTime Player 与多数默认浏览器无法解码。
+ *
+ * 策略：
+ *  - mp4/mov：优先 H.264(avc1) 的 MP4 流；其次排除 av01/vp9 的任意流；最后兜底（仍可能命中 av01，由下载后探测+自动修复兜底）。
+ *  - webm：容器本身浏览器友好，VP9/AV1 均可保留。
+ *  - 其他容器(mkv 等)：不强制编码，优先可合并流。
+ */
+function buildFormatSelector(height: number, ext: string): string {
+  if (ext === 'mp4' || ext === 'mov') {
+    return [
+      `bv*[height<=${height}][ext=mp4][vcodec*=avc1]+ba[ext=m4a]`,
+      `bv*[height<=${height}][vcodec*=avc1]+ba[ext=m4a]`,
+      `bv*[height<=${height}][vcodec!*=av01][vcodec!*=vp9]+ba`,
+      `b[height<=${height}][ext=mp4][vcodec*=avc1]`,
+      `b[height<=${height}][vcodec!*=av01][vcodec!*=vp9]`,
+      `b[height<=${height}]`,
+      'b',
+    ].join('/');
+  }
+  if (ext === 'webm') {
+    return [
+      `bv*[height<=${height}][ext=webm]+ba[ext=webm]`,
+      `bv*[height<=${height}]+ba`,
+      `b[height<=${height}][ext=webm]`,
+      `b[height<=${height}]`,
+      'b',
+    ].join('/');
+  }
+  return [
+    `bv*[height<=${height}][ext=${ext}]+ba`,
+    `bv*[height<=${height}]+ba`,
+    `b[height<=${height}][ext=${ext}]`,
+    `b[height<=${height}]`,
+    'b',
+  ].join('/');
+}
+
 interface ProgressPayload {
   downloadedBytes: number;
   fileSizeBytes: number;
@@ -203,13 +243,9 @@ class YtDlpDownload implements DownloadHandle {
     // 高清源普遍是视频/音频分离流（DASH），必须 bv*+ba 组合再由 ffmpeg 合并，
     // 否则 best[...] 只会命中渐进式单流，YouTube 上实际上限被压到 360p，
     // 导致用户选择的分辨率形同虚设。逐级回退保证总能下到东西。
-    const formatSelector = [
-      `bv*[height<=${height}][ext=${ext}]+ba[ext=${ext === 'mp4' ? 'm4a' : 'webm'}]`,
-      `bv*[height<=${height}]+ba`,
-      `b[height<=${height}][ext=${ext}]`,
-      `b[height<=${height}]`,
-      'b',
-    ].join('/');
+    // 关键修复：buildFormatSelector 会显式排除 AV1(av01)/VP9(vp9) 视频流并优先 H.264(avc1)，
+    // 否则 yt-dlp 的 bv*[ext=mp4] 会命中 AV1-in-MP4，QuickTime / 多数浏览器无法解码 → 下载后无法播放。
+    const formatSelector = buildFormatSelector(height, ext);
     // mov 不是 yt-dlp 的 merge-output-format 直接支持值，合并为 mp4 容器即可（.mov 扩展名保留）。
     const mergeFormat = ext === 'mov' ? 'mp4' : ext;
     const args = [

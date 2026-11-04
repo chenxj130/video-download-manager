@@ -47,6 +47,19 @@ export interface VideoMetadata {
   estimatedBytes?: number;
 }
 
+/** 下载完成后探测到的媒体编码与可播放性信息 */
+export interface TaskMedia {
+  container?: string;
+  videoCodec?: string;
+  audioCodec?: string;
+  width?: number;
+  height?: number;
+  durationSeconds?: number;
+  playerCompatible?: boolean;
+  repaired?: boolean;
+  notes?: string;
+}
+
 export interface DownloadTask {
   id: string;
   url: string;
@@ -74,6 +87,7 @@ export interface DownloadTask {
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
+  media?: TaskMedia;
 }
 
 export interface Settings {

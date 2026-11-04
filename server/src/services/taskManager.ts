@@ -17,6 +17,7 @@ import { sanitizeFileName, clamp } from '../utils/format.js';
 import { config } from '../config.js';
 import { getEngine, getEngineName } from '../engine/index.js';
 import { AbortError, type ProgressUpdate } from '../engine/simulate.js';
+import { probeMedia, repairToH264 } from '../utils/media.js';
 import { SIMULATE_MAX_BYTES, SIMULATE_MIN_BYTES } from '../constants.js';
 import { logger } from '../utils/logger.js';
 
@@ -214,7 +215,10 @@ class TaskManager {
 
     handle
       .run()
-      .then((res) => this.onComplete(task.id, res.filePath, res.fileSizeBytes))
+      .then((res) => {
+        // 媒体探测/自动修复在 onComplete 内部异步执行，自身捕获异常，避免污染下载成功状态
+        void this.onComplete(task.id, res.filePath, res.fileSizeBytes);
+      })
       .catch((err) => this.onError(task.id, err));
   }
 
@@ -233,7 +237,7 @@ class TaskManager {
     }
   }
 
-  private onComplete(id: string, filePath: string, fileSize: number): void {
+  private async onComplete(id: string, filePath: string, fileSize: number): Promise<void> {
     const task = this.tasks.get(id);
     if (!task) return;
     task.status = 'completed';
@@ -245,9 +249,34 @@ class TaskManager {
     task.speedBytesPerSec = 0;
     task.etaSeconds = 0;
     task.completedAt = new Date().toISOString();
+
+    // 下载后媒体校验：探测编码与可播放性；不兼容时按配置自动转码修复，
+    // 从源头消除「下载完成但无法播放」的复现风险。
+    if (task.format !== 'mp3' && task.format !== 'm4a') {
+      try {
+        const media = await probeMedia(filePath);
+        if (media) {
+          task.media = media;
+          if (media.playerCompatible === false && config.autoRepairIncompatible) {
+            logger.warn(
+              `检测到不兼容编码 ${media.videoCodec}/${media.container}，自动转码为 H.264: ${task.id}`
+            );
+            const repaired = await repairToH264(filePath, true);
+            task.filePath = repaired.filePath;
+            task.fileName = path.basename(repaired.filePath);
+            task.fileSizeBytes = repaired.fileSizeBytes;
+            task.downloadedBytes = repaired.fileSizeBytes;
+            task.media = { ...repaired.media, repaired: true };
+          }
+        }
+      } catch (e) {
+        logger.warn(`媒体校验/修复跳过（不影响下载结果）${task.id}: ${(e as Error).message}`);
+      }
+    }
+
     this.active.delete(id);
     this.save(task);
-    logger.info(`下载完成 ${id} -> ${filePath}`);
+    logger.info(`下载完成 ${id} -> ${task.filePath}`);
     this.startQueue();
   }
 
@@ -408,6 +437,37 @@ class TaskManager {
       this.save(task);
     }
     return ok;
+  }
+
+  /** 手动修复：对已完成但编码不兼容的任务转码为 H.264+AAC 可播放格式 */
+  async repair(id: string): Promise<DownloadTask> {
+    const task = this.require(id);
+    if (task.status !== 'completed' || !task.filePath) {
+      throw new ApiError('INVALID_URL', '仅已完成且存在文件的任务可修复', 400);
+    }
+    if (!fs.existsSync(task.filePath)) {
+      throw new ApiError('FILE_NOT_FOUND', '文件不存在，可能已被删除', 404);
+    }
+    try {
+      const media = await probeMedia(task.filePath);
+      if (media && media.playerCompatible) {
+        // 已经可播放，无需转码，仅刷新探测信息
+        task.media = media;
+        this.save(task);
+        return task;
+      }
+      const repaired = await repairToH264(task.filePath, true);
+      task.filePath = repaired.filePath;
+      task.fileName = path.basename(repaired.filePath);
+      task.fileSizeBytes = repaired.fileSizeBytes;
+      task.downloadedBytes = repaired.fileSizeBytes;
+      task.media = { ...repaired.media, repaired: true };
+      this.save(task);
+      return task;
+    } catch (e) {
+      if (e instanceof ApiError) throw e;
+      throw new ApiError('WRITE_FAILED', `修复失败: ${(e as Error).message}`, 500);
+    }
   }
 
   private require(id: string): DownloadTask {

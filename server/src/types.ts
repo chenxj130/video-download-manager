@@ -61,6 +61,25 @@ export interface VideoMetadata {
   estimatedBytes?: number;
 }
 
+/** 下载完成后探测到的媒体编码与可播放性信息 */
+export interface TaskMedia {
+  /** 容器格式：mp4 / webm / mkv / mov 等 */
+  container?: string;
+  /** 视频编码：h264 / av1 / vp9 / hevc 等（音频任务可缺省） */
+  videoCodec?: string;
+  /** 音频编码：aac / opus / none 等 */
+  audioCodec?: string;
+  width?: number;
+  height?: number;
+  durationSeconds?: number;
+  /** 是否可被常见播放器（QuickTime Player + 主流浏览器）直接解码 */
+  playerCompatible?: boolean;
+  /** 是否经过自动/手动修复（已转码为 H.264+AAC） */
+  repaired?: boolean;
+  /** 探测/修复说明（如不支持原因） */
+  notes?: string;
+}
+
 /** 下载任务（与数据库字段对应） */
 export interface DownloadTask {
   id: string;
@@ -89,6 +108,8 @@ export interface DownloadTask {
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
+  /** 下载后媒体探测信息（编码/容器/可播放性），可为空 */
+  media?: TaskMedia;
 }
 
 export interface Settings {

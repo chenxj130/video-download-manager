@@ -3,7 +3,7 @@ import type { SVGProps } from 'react';
 type IconName =
   | 'home' | 'tasks' | 'history' | 'dashboard' | 'settings'
   | 'sun' | 'moon' | 'plus' | 'pause' | 'play'
-  | 'close' | 'retry' | 'trash' | 'folder' | 'search'
+  | 'close' | 'retry' | 'trash' | 'folder' | 'search' | 'wrench'
   | 'check' | 'alert' | 'drag' | 'wifi' | 'link' | 'chip' | 'gauge' | 'database' | 'disk' | 'radar';
 
 const paths: Record<IconName, JSX.Element> = {
@@ -32,6 +32,7 @@ const paths: Record<IconName, JSX.Element> = {
   trash: <path d="M4 7h16M9 7V4h6v3m-7 0 1 13h6l1-13" />,
   folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
   search: <><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></>,
+  wrench: <path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8 6.2 21l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.5 2.5-2.1-2.1 2.5-2.5z" />,
   check: <path d="M5 13l4 4L19 7" />,
   alert: <path d="M12 9v4m0 4h.01M10.3 3.9 2.4 17a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />,
   drag: <path d="M12 3v18M3 12h18" />,

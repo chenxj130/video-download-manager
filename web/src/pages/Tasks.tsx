@@ -30,6 +30,7 @@ export function Tasks() {
   } | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const { toast } = useToast();
+  const [repairingIds, setRepairingIds] = useState<Set<string>>(new Set());
 
   const tasks = data?.tasks ?? [];
 
@@ -54,6 +55,22 @@ export function Tasks() {
       toast(ok, 'success');
     } catch (e) {
       toast((e as ApiRequestError).message || '操作失败', 'error');
+    }
+  };
+
+  const repair = async (id: string) => {
+    setRepairingIds((s) => new Set(s).add(id));
+    try {
+      await api.repair(id);
+      toast('已修复为 H.264 可播放格式', 'success');
+    } catch (e) {
+      toast((e as ApiRequestError).message || '修复失败', 'error');
+    } finally {
+      setRepairingIds((s) => {
+        const n = new Set(s);
+        n.delete(id);
+        return n;
+      });
     }
   };
 
@@ -110,6 +127,8 @@ export function Tasks() {
               }}
               onOpenFolder={() => act(t.id, () => api.openTaskFolder(t.id), '已打开所在目录')}
               onPreview={() => setPreviewId(t.id)}
+              onRepair={() => repair(t.id)}
+              repairing={repairingIds.has(t.id)}
             />
           ))}
         </div>
@@ -203,6 +222,8 @@ function TaskRow({
   onCopyPath,
   onOpenFolder,
   onPreview,
+  onRepair,
+  repairing,
 }: {
   task: DownloadTask;
   onPause: () => void;
@@ -214,6 +235,8 @@ function TaskRow({
   onCopyPath: (p: string) => void;
   onOpenFolder: () => void;
   onPreview: () => void;
+  onRepair: () => void;
+  repairing?: boolean;
 }) {
   const active = task.status === 'downloading';
   const showProgress = active || task.status === 'paused' || (task.status === 'completed' && task.progress < 100);
@@ -247,6 +270,19 @@ function TaskRow({
               <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 {task.platformName} · {task.resolution} · {task.format.toUpperCase()} ·{' '}
                 {formatBytes(task.fileSizeBytes)}
+                {task.media?.videoCodec && (
+                  <span
+                    className={clsx(
+                      'ml-1.5 rounded px-1.5 py-0.5 text-[10px] font-medium',
+                      task.media.playerCompatible === false
+                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                        : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                    )}
+                  >
+                    {task.media.videoCodec.toUpperCase()}
+                    {task.media.repaired ? '·已修复' : ''}
+                  </span>
+                )}
               </p>
             </div>
             <StatusBadge status={task.status} />
@@ -277,6 +313,16 @@ function TaskRow({
             <p className="mt-2 text-xs text-emerald-600 dark:text-emerald-400">
               <Icon name="check" size={13} className="mr-1 inline" />
               已完成 · {formatBytes(task.fileSizeBytes)} · {formatDate(task.completedAt ?? task.updatedAt)}
+            </p>
+          )}
+
+          {task.status === 'completed' && task.media && task.media.playerCompatible === false && (
+            <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+              <Icon name="alert" size={13} />
+              <span>
+                编码不兼容（{task.media.videoCodec?.toUpperCase()}/{task.media.container?.toUpperCase()}），
+                QuickTime 等播放器可能无法播放
+              </span>
             </p>
           )}
 
@@ -332,6 +378,18 @@ function TaskRow({
             )}
             {task.status === 'completed' && (
               <>
+                {task.media && task.media.playerCompatible === false && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={onRepair}
+                    disabled={repairing}
+                    icon={<Icon name="wrench" size={14} />}
+                    title="转码为 H.264+AAC 可播放格式"
+                  >
+                    {repairing ? '修复中…' : '修复'}
+                  </Button>
+                )}
                 {task.filePath && (
                   <>
                     <Button

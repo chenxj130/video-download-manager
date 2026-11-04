@@ -77,6 +77,15 @@ router.post(
   })
 );
 
+/** 修复：将编码不兼容的视频转码为 H.264+AAC 可播放格式 */
+router.post(
+  '/:id/repair',
+  wrap(async (req, res) => {
+    const task = await taskManager.repair(req.params.id);
+    res.json({ task });
+  })
+);
+
 /** 删除文件（不影响任务记录） */
 router.delete(
   '/:id/file',

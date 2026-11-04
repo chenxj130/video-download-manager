@@ -48,6 +48,19 @@ export function History() {
     }
   };
 
+  const [repairingId, setRepairingId] = useState<string | null>(null);
+  const repair = async (t: DownloadTask) => {
+    setRepairingId(t.id);
+    try {
+      await api.repair(t.id);
+      toast('已修复为 H.264 可播放格式', 'success');
+    } catch (e) {
+      toast((e as ApiRequestError).message || '修复失败', 'error');
+    } finally {
+      setRepairingId(null);
+    }
+  };
+
   return (
     <div>
       {/* 筛选栏 */}
@@ -140,7 +153,18 @@ export function History() {
                     {formatDate(t.completedAt ?? t.updatedAt)}
                   </td>
                   <td className="px-4 py-3">
-                    <StatusBadge status={t.status} />
+                    <div className="flex items-center gap-1.5">
+                      <StatusBadge status={t.status} />
+                      {t.media && t.media.playerCompatible === false && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                          title={`编码不兼容（${t.media.videoCodec?.toUpperCase()}/${t.media.container?.toUpperCase()}），部分播放器无法播放`}
+                        >
+                          <Icon name="alert" size={11} />
+                          不兼容
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="hidden px-4 py-3 font-mono text-xs text-slate-400 lg:table-cell">
                     <span className="block max-w-[200px] truncate" title={t.filePath}>
@@ -148,6 +172,18 @@ export function History() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
+                    {t.status === 'completed' && t.filePath && t.media && t.media.playerCompatible === false && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => repair(t)}
+                        disabled={repairingId === t.id}
+                        icon={<Icon name="wrench" size={14} />}
+                        title="转码为 H.264 可播放格式"
+                      >
+                        {repairingId === t.id ? '修复中…' : '修复'}
+                      </Button>
+                    )}
                     {t.status === 'completed' && t.filePath && (
                       <Button
                         size="sm"
