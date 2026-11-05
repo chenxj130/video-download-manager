@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from '../config.js';
 import { taskManager } from '../services/taskManager.js';
+import { isPathAllowed } from '../utils/pathSafety.js';
 import { ApiError } from '../utils/errors.js';
 import { wrap } from './_helpers.js';
 
@@ -23,23 +23,9 @@ function mimeFromExt(ext: string): string {
   return map[ext.toLowerCase()] || 'application/octet-stream';
 }
 
-function getAllowedBases(): string[] {
-  const set = new Set<string>();
-  set.add(path.normalize(config.downloadDir));
-  for (const t of taskManager.getTasks()) {
-    if (t.saveDir) set.add(path.normalize(t.saveDir));
-  }
-  return Array.from(set);
-}
-
-export function isPathAllowed(filePath: string): boolean {
-  const normalized = path.normalize(path.resolve(filePath));
-  for (const base of getAllowedBases()) {
-    const sepBase = base.endsWith(path.sep) ? base : base + path.sep;
-    if (normalized === base || normalized.startsWith(sepBase)) return true;
-  }
-  return false;
-}
+// 白名单统一由 utils/pathSafety 提供（仅服务端配置，不再信任用户提交的 saveDir），
+// 此处 re-export 以保持 tasks.ts 等既有调用点的导入路径不变。
+export { isPathAllowed };
 
 function sendVideo(req: import('express').Request, res: import('express').Response, filePath: string): void {
   const stat = fs.statSync(filePath);

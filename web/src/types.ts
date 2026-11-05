@@ -159,6 +159,15 @@ export interface MitmValidation {
   headerHex: string;
   ffprobe?: string;
   reason?: string;
+  videoCodec?: string;
+  audioCodec?: string;
+  container?: string;
+  /** 是否可被常见播放器（QuickTime + 主流浏览器）直接解码 */
+  playerCompatible?: boolean;
+  repaired?: boolean;
+  /** 是否完成编码级校验（ffprobe 不可用时为 false） */
+  codecChecked?: boolean;
+  notes?: string;
 }
 
 export interface MitmTask {

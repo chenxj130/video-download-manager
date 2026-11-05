@@ -129,6 +129,7 @@ export const api = {
     cancel: (id: string) => request<{ task: MitmTask }>('POST', `/mitm/tasks/${id}/cancel`),
     retry: (id: string) => request<{ task: MitmTask }>('POST', `/mitm/tasks/${id}/retry`),
     revalidate: (id: string) => request<{ validation: MitmValidation }>('POST', `/mitm/tasks/${id}/revalidate`),
+    repair: (id: string) => request<{ task: MitmTask }>('POST', `/mitm/tasks/${id}/repair`),
     deleteTask: (id: string, deleteFile = false) =>
       request<{ ok: boolean }>('DELETE', `/mitm/tasks/${id}${deleteFile ? '?deleteFile=true' : ''}`),
     streamUrl: (id: string) => `/api/mitm/tasks/${id}/stream`,

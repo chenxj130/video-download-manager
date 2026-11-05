@@ -26,7 +26,8 @@ export function detectPlatform(url: string): PlatformMeta | null {
   const host = getHostname(url);
   if (!host) return null;
   for (const p of PLATFORMS) {
-    if (p.hosts.some((h) => host === h || host.endsWith('.' + h) || host.includes(h))) {
+    // 仅精确匹配或子域匹配（host.endsWith('.' + h)），杜绝 "notyoutube.com".includes("youtube.com") 式仿冒
+    if (p.hosts.some((h) => host === h || host.endsWith('.' + h))) {
       return p;
     }
   }

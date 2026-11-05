@@ -53,13 +53,40 @@ export const config = {
   autoRepairIncompatible: process.env.AUTO_REPAIR_INCOMPATIBLE !== '0',
   /** ffprobe 可执行文件：可为命令名（走 PATH）或绝对路径，用于下载后媒体编码探测 */
   ffprobeBin: process.env.FFPROBE_PATH ?? 'ffprobe',
+  /**
+   * 额外允许的保存/读取目录（逗号分隔的绝对路径）。默认仅 config.downloadDir。
+   * 用于替代「把用户提交的 saveDir 直接加入白名单」这一越权读漏洞的显式授权通道。
+   */
+  allowedExtraDirs: (process.env.ALLOWED_EXTRA_DIRS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   webDist: resolveDir(
     process.env.WEB_DIST ?? '../web/dist',
     SERVER_DIR
   ),
   logLevel: (process.env.LOG_LEVEL ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
   requestTimeoutSeconds: Number(process.env.REQUEST_TIMEOUT ?? 60),
-  version: '1.1.2',
+  /**
+   * 服务监听地址。默认仅绑定回环地址（127.0.0.1），不外曝到局域网/公网。
+   * 如需对外提供服务，请显式设置 HOST 并同时配置 API_TOKEN 与 CORS_ORIGINS。
+   */
+  host: process.env.HOST ?? '127.0.0.1',
+  /**
+   * 可选 API 鉴权令牌。留空 = 本地信任模式（不校验，便于本机使用）；
+   * 设置后，除 /api/health 外的所有 /api 请求必须携带
+   * `Authorization: Bearer <token>` 或 `x-api-token: <token>`，否则返回 401。
+   */
+  apiToken: process.env.API_TOKEN ?? '',
+  /**
+   * 显式允许的跨域来源（逗号分隔，完整 origin 字符串，如 https://app.example.com）。
+   * 留空 = 仅允许同源与 localhost 来源（兼容 Vite dev 跨域），其余一律拒绝。
+   */
+  corsOrigins: (process.env.CORS_ORIGINS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+  version: '1.1.3',
   /** MITM 嗅探下载接入层（与现有功能完全隔离） */
   mitm: {
     /** 是否启用接入层；默认开启 */
@@ -75,6 +102,11 @@ export const config = {
     persistFile: path.join(resolveDataDir(process.env.DATA_DIR ?? './data'), 'mitm-tasks.json'),
     maxConcurrent: Number(process.env.MITM_MAX_CONCURRENT ?? 3),
     timeoutMs: Number(process.env.MITM_TIMEOUT_MS ?? 120000),
+    /**
+     * 下载后检测到编码不兼容（AV1/VP9-in-MP4 等）时，自动转码为 H.264+AAC。
+     * 默认开启；设 0 则仅标记 playerCompatible=false 并保留手动 repair 入口。
+     */
+    autoRepairIncompatible: process.env.MITM_AUTO_REPAIR !== '0',
     /** 本服务对外基址，用于拼接内置 fixture 演示直链 */
     baseUrl: process.env.MITM_BASE_URL ?? `http://127.0.0.1:${Number(process.env.PORT ?? 8787)}`,
     ffprobeBin: process.env.MITM_FFPROBE_PATH ?? 'ffprobe',

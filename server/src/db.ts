@@ -215,7 +215,7 @@ UPDATE tasks SET
   speed_bytes_per_sec=@speedBytesPerSec, status=@status, error_code=@errorCode,
   error_message=@errorMessage, progress=@progress, eta_seconds=@etaSeconds,
   retry_count=@retryCount, created_at=@createdAt, updated_at=@updatedAt,
-  started_at=@startedAt, completed_at=@completedAt
+  started_at=@startedAt, completed_at=@completedAt, media=@media
 WHERE id=@id
 `);
 

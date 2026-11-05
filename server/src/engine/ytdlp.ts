@@ -1,4 +1,4 @@
-import { spawn, execSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -15,19 +15,26 @@ import { logger } from '../utils/logger.js';
 import { AbortError, type DownloadContext, type DownloadHandle, type VideoEngine } from './simulate.js';
 
 /**
- * 把命令名解析为绝对路径。
+ * 把命令名解析为绝对路径（纯文件系统扫描，不调用 shell，避免命令注入）。
  * 关键修复：yt-dlp 的合并后处理器在 `--ffmpeg-location` 收到裸命令名（如 "ffmpeg"）时，
  * 在其子进程上下文里往往解析不到可执行文件，导致合并步骤被静默跳过（退出码仍 0），
  * 只留下 DASH 分离的视频/音频分流文件。传绝对路径可确保合并必然触发。
  */
 function resolveBin(name: string): string {
   if (path.isAbsolute(name)) return name;
-  try {
-    const found = execSync(`command -v ${JSON.stringify(name)}`, { encoding: 'utf8' }).trim();
-    return found || name;
-  } catch {
-    return name;
+  const exts = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
+  const dirs = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      const candidate = path.join(dir, name + ext);
+      try {
+        if (fs.statSync(candidate).isFile()) return candidate;
+      } catch {
+        /* 不存在，继续 */
+      }
+    }
   }
+  return name; // 兜底：原样返回，交由 spawn 自行报错
 }
 
 /** 仅当系统已安装 yt-dlp + ffmpeg 时使用的真实下载引擎 */
@@ -64,7 +71,7 @@ export class YtDlpEngine implements VideoEngine {
       throw new ApiError('PARSE_FAILED', '解析返回数据异常', 400);
     }
     const host = new URL(url).hostname.toLowerCase();
-    const meta = PLATFORMS.find((p) => p.hosts.some((h) => host.includes(h)));
+    const meta = PLATFORMS.find((p) => p.hosts.some((h) => host === h || host.endsWith('.' + h)));
     const platform = (meta?.key ?? 'unknown') as Platform;
 
     const formats: VideoFormatOption[] = [];
@@ -354,10 +361,12 @@ class YtDlpDownload implements DownloadHandle {
     const ffprobe = resolveBin('ffprobe');
     const classify = (file: string): 'video' | 'audio' | null => {
       try {
-        const out = execSync(
-          `"${ffprobe}" -v error -show_entries stream=codec_type -of csv=p=0 "${file}"`,
+        const r = spawnSync(
+          ffprobe,
+          ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', file],
           { encoding: 'utf8' }
         );
+        const out = (r.stdout ?? '').toString();
         if (out.includes('video')) return 'video';
         if (out.includes('audio')) return 'audio';
       } catch {
@@ -369,7 +378,7 @@ class YtDlpDownload implements DownloadHandle {
     const audio = frags.find((f) => classify(f) === 'audio' && f !== video);
     if (!video) return false;
     const inputs = audio ? [video, audio] : [video];
-    const cmd = [
+    const args = [
       ff,
       '-y',
       ...inputs.flatMap((f) => ['-i', f]),
@@ -380,8 +389,8 @@ class YtDlpDownload implements DownloadHandle {
       target,
     ];
     try {
-      execSync(cmd.map((c) => JSON.stringify(c)).join(' '), { stdio: 'ignore' });
-      return fs.existsSync(target) && fs.statSync(target).size > 0;
+      const r = spawnSync(ff, args, { stdio: 'ignore' });
+      return r.status === 0 && fs.existsSync(target) && fs.statSync(target).size > 0;
     } catch (e) {
       logger.error(`兜底合并失败，任务=${this.ctx.task.id}: ${(e as Error).message}`);
       return false;

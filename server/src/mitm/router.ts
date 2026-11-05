@@ -9,6 +9,7 @@ import { MitmStore } from './store.js';
 import fixtureRouter, { demoUrl, fixtureAssetExists, fixtureAssetPath } from './fixture.js';
 import { ADAPTERS, PLATFORM_KEYS, probeUrl, detectPlatform, buildHeaders } from './platforms.js';
 import { probeBridge, bridgeGetConfig, bridgeDownload } from './bridge.js';
+import { assertSafeUrl, sanitizeHeaders } from './safety.js';
 import type { MitmPlatform, MitmDownloaderStatus } from './types.js';
 
 /** 解析 ffprobe 绝对路径（仅用于产物校验，失败则跳过 ffprobe 环节） */
@@ -43,6 +44,15 @@ if (config.mitm.fixtureEnabled) {
 
 function assertEnabled(): void {
   if (!config.mitm.enabled) throw new ApiError('ENGINE_UNAVAILABLE', 'MITM 接入层未启用', 503);
+}
+
+/** SSRF 防护：把安全校验失败映射为可读的 400，而非未捕获异常 500 */
+function assertSafeUrlOr400(url: string): void {
+  try {
+    assertSafeUrl(url);
+  } catch (e) {
+    throw new ApiError('INVALID_URL', (e as Error).message, 400);
+  }
 }
 
 /** 模块级状态：引擎、桥接、fixture、版本 */
@@ -127,6 +137,7 @@ router.post(
     if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
       throw new ApiError('INVALID_URL', '请提供合法的 http(s) 资源链接', 400);
     }
+    assertSafeUrlOr400(url);
     if (platform && platform !== 'unknown' && !(PLATFORM_KEYS as string[]).includes(platform)) {
       throw new ApiError('UNSUPPORTED_PLATFORM', '不支持的平台', 400);
     }
@@ -138,7 +149,8 @@ router.post(
         400
       );
     }
-    const task = store.create({ url, platform, title, headers, source });
+    // 用户自定义请求头做键白名单，禁止注入 Host/Cookie/Authorization 等凭证类键
+    const task = store.create({ url, platform, title, headers: sanitizeHeaders(headers), source });
     res.status(201).json({ task });
   })
 );
@@ -183,10 +195,16 @@ router.get(
       : 'application/octet-stream';
     const range = req.headers.range;
     if (range) {
-      const m = /bytes=(\d+)-(\d*)/.exec(range);
-      const start = m ? parseInt(m[1], 10) : 0;
-      const end = m && m[2] ? parseInt(m[2], 10) : stat.size - 1;
-      if (Number.isNaN(start) || start < 0 || end >= stat.size || start > end) {
+      // A08：非法 Range 头（如 "bytes=abc"）旧实现会被当成 0-全量返回 206，
+      // 违反 RFC 7233，且会让「部分请求」伪装成完整文件。此处严格解析并回 416。
+      const m = /^bytes=(\d+)-(\d*)$/.exec(String(range).trim());
+      if (!m) {
+        res.status(416).set('Content-Range', `bytes */${stat.size}`).end();
+        return;
+      }
+      const start = parseInt(m[1], 10);
+      const end = m[2] ? parseInt(m[2], 10) : stat.size - 1;
+      if (Number.isNaN(start) || Number.isNaN(end) || start < 0 || end >= stat.size || start > end) {
         res.status(416).set('Content-Range', `bytes */${stat.size}`).end();
         return;
       }
@@ -221,6 +239,22 @@ router.post('/tasks/:id/revalidate', wrap(async (req, res) => {
   const v = await store.revalidate(req.params.id);
   if (!v) throw new ApiError('TASK_NOT_FOUND', '任务不存在', 404);
   res.json({ validation: v });
+}));
+
+/** 修复：将编码不兼容（如 AV1/VP9-in-MP4）的产物转码为 H.264+AAC 可播放格式 */
+router.post('/tasks/:id/repair', wrap(async (req, res) => {
+  const t = store.get(req.params.id);
+  if (!t) throw new ApiError('TASK_NOT_FOUND', '任务不存在', 404);
+  if (t.status !== 'completed') throw new ApiError('INVALID_URL', '仅已完成的产物可修复', 400);
+  if (!fs.existsSync(t.filePath)) throw new ApiError('FILE_NOT_FOUND', '产物文件不存在', 404);
+  try {
+    const updated = await store.repair(req.params.id);
+    if (!updated) throw new ApiError('TASK_NOT_FOUND', '任务不存在', 404);
+    res.json({ task: updated });
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    throw new ApiError('WRITE_FAILED', `修复失败: ${(e as Error).message}`, 500);
+  }
 }));
 
 router.delete('/tasks/:id', wrap(async (req, res) => {
@@ -276,6 +310,16 @@ router.post('/bridge/download', wrap(async (req, res) => {
   if (!config.mitm.bridgeEnabled) throw new ApiError('ENGINE_UNAVAILABLE', '桥接未启用', 503);
   const { url, ...rest } = req.body ?? {};
   if (!url || typeof url !== 'string') throw new ApiError('INVALID_URL', '缺少资源直链', 400);
+  assertSafeUrlOr400(url);
+  // 与 /tasks 保持一致：桥接委派同样拒绝分享页/落地页，避免绕过 SHARE_PAGE_NOT_SUPPORTED
+  const urlProbe = probeUrl(url);
+  if (urlProbe.isSharePage) {
+    throw new ApiError(
+      'SHARE_PAGE_NOT_SUPPORTED',
+      '检测到这是平台分享页/落地页链接，不是可下载的视频直链；请提交抓包得到的真实 .mp4 直链。',
+      400
+    );
+  }
   const platform = detectPlatform(url);
   const mediaInfo = {
     Id: `vdm-${Date.now()}`,

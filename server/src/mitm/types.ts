@@ -101,12 +101,28 @@ export interface MitmTask {
 
 /** 产物校验结果 */
 export interface MitmValidation {
+  /** 文件完整性 + 结构合法 + 含可识别音视频流 */
   valid: boolean;
   sizeMatches: boolean;
   magicValid: boolean;
   actualSize: number;
   expectedSize: number;
   headerHex: string;
+  /** 音视频流摘要（video:h264+audio:aac 等） */
   ffprobe?: string;
   reason?: string;
+  /** 视频编码（h264 / av1 / vp9 / hevc …） */
+  videoCodec?: string;
+  /** 音频编码（aac / opus / none …） */
+  audioCodec?: string;
+  /** 容器（mp4 / webm / mkv …） */
+  container?: string;
+  /** 是否可被常见播放器（QuickTime + 主流浏览器）直接解码 */
+  playerCompatible?: boolean;
+  /** 是否已通过修复转码为 H.264+AAC */
+  repaired?: boolean;
+  /** 是否完成编码级校验（ffprobe 不可用时为 false，仅做了容器/大小校验） */
+  codecChecked?: boolean;
+  /** 不兼容说明 / 校验备注 */
+  notes?: string;
 }

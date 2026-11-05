@@ -48,16 +48,21 @@ export function History() {
     }
   };
 
-  const [repairingId, setRepairingId] = useState<string | null>(null);
+  // 用集合管理多任务并发修复，避免单值状态被后发起的任务覆盖
+  const [repairingIds, setRepairingIds] = useState<Set<string>>(new Set());
   const repair = async (t: DownloadTask) => {
-    setRepairingId(t.id);
+    setRepairingIds((s) => new Set(s).add(t.id));
     try {
       await api.repair(t.id);
       toast('已修复为 H.264 可播放格式', 'success');
     } catch (e) {
       toast((e as ApiRequestError).message || '修复失败', 'error');
     } finally {
-      setRepairingId(null);
+      setRepairingIds((s) => {
+        const n = new Set(s);
+        n.delete(t.id);
+        return n;
+      });
     }
   };
 
@@ -177,11 +182,11 @@ export function History() {
                         size="sm"
                         variant="secondary"
                         onClick={() => repair(t)}
-                        disabled={repairingId === t.id}
+                        disabled={repairingIds.has(t.id)}
                         icon={<Icon name="wrench" size={14} />}
                         title="转码为 H.264 可播放格式"
                       >
-                        {repairingId === t.id ? '修复中…' : '修复'}
+                        {repairingIds.has(t.id) ? '修复中…' : '修复'}
                       </Button>
                     )}
                     {t.status === 'completed' && t.filePath && (

@@ -13,6 +13,7 @@ import {
 import type { DownloadTask, Settings, VideoMetadata, DashboardStats, SystemInfo } from '../types.js';
 import { ApiError, mapEngineError } from '../utils/errors.js';
 import { getDiskSpace, ensureDir, removeFileSafe } from '../utils/file.js';
+import { assertSafeSaveDir } from '../utils/pathSafety.js';
 import { sanitizeFileName, clamp } from '../utils/format.js';
 import { config } from '../config.js';
 import { getEngine, getEngineName } from '../engine/index.js';
@@ -111,6 +112,9 @@ class TaskManager {
     }
 
     const saveDir = selection.saveDir?.trim() || settings.defaultSaveDir || config.downloadDir;
+    // P0 修复：保存目录必须落在服务端白名单内，避免用户提交的任意目录被
+    // ensureDir 创建并被 isPathAllowed 纳入可读范围（越权写 + 越权读）。
+    assertSafeSaveDir(saveDir);
     ensureDir(saveDir);
 
     // 选择文件格式大小
@@ -250,8 +254,15 @@ class TaskManager {
     task.etaSeconds = 0;
     task.completedAt = new Date().toISOString();
 
+    // 先释放下载槽并推进队列：ffprobe / 转码可能耗时数十秒（尤其软件解码 AV1），
+    // 不能让它阻塞后续等待任务的入队。
+    this.active.delete(id);
+    this.save(task);
+    logger.info(`下载完成 ${id} -> ${task.filePath}`);
+    this.startQueue();
+
     // 下载后媒体校验：探测编码与可播放性；不兼容时按配置自动转码修复，
-    // 从源头消除「下载完成但无法播放」的复现风险。
+    // 从源头消除「下载完成但无法播放」的复现风险。异步执行，不阻塞队列。
     if (task.format !== 'mp3' && task.format !== 'm4a') {
       try {
         const media = await probeMedia(filePath);
@@ -268,16 +279,13 @@ class TaskManager {
             task.downloadedBytes = repaired.fileSizeBytes;
             task.media = { ...repaired.media, repaired: true };
           }
+          // 二次持久化：把 media / 修复后的路径写入 DB（updateStmt 已含 media 列）
+          this.save(task);
         }
       } catch (e) {
         logger.warn(`媒体校验/修复跳过（不影响下载结果）${task.id}: ${(e as Error).message}`);
       }
     }
-
-    this.active.delete(id);
-    this.save(task);
-    logger.info(`下载完成 ${id} -> ${task.filePath}`);
-    this.startQueue();
   }
 
   private onError(id: string, err: unknown): void {

@@ -78,10 +78,14 @@ export function isPlayerCompatible(
   return true;
 }
 
-/** 用 ffprobe 探测媒体信息；失败或文件缺失返回 null（调用方应忽略而非中断流程）。 */
-export async function probeMedia(filePath: string): Promise<TaskMedia | null> {
+/**
+ * 用 ffprobe 探测媒体信息；失败或文件缺失返回 null（调用方应忽略而非中断流程）。
+ * @param ffprobeBinOverride 可选：指定 ffprobe 路径（MITM 接入层有独立配置项），
+ *   使主任务链路与 MITM 链路共用同一套编码/可播放性判定逻辑，避免判定分叉。
+ */
+export async function probeMedia(filePath: string, ffprobeBinOverride?: string): Promise<TaskMedia | null> {
   if (!filePath || !fs.existsSync(filePath)) return null;
-  const bin = config.ffprobeBin;
+  const bin = ffprobeBinOverride || config.ffprobeBin;
   if (!(await hasExecutable(bin))) {
     logger.warn(`ffprobe 不可用（${bin}），跳过媒体探测`);
     return null;

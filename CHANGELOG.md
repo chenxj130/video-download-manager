@@ -48,6 +48,52 @@
 
 ---
 
+## v1.1.3 — 系统诊断收口 + 安全加固（CORS/鉴权、命令注入、平台仿冒）（2026-11-05）
+
+> 范围：全量代码审查（74 个源码文件 / 7758 行）+ 视频号业务流端到端测试矩阵（33 用例）。
+> 在 v1.1.2 基础上补齐诊断期发现并收口：MITM 假成功闭环、历史数据回填、以及下列安全加固。
+> 版本号已 bump 至 `1.1.3`，已提交（未 push）。
+
+### 实测复现并修复
+
+| 编号 | 严重度 | 问题 / 根因 | 修复 |
+|---|---|---|---|
+| B1/A03/A04 | P1 | `validateOutput` 的 `headerHex.startsWith('000000')` 宽松分支 + ffprobe 失败仅标 `unavailable` 不推翻 `valid` → 无 ftyp 垃圾文件被记为「下载成功」（实测 1024B 假 MP4 `valid:true`） | 改为多容器签名严格判定，ffprobe 解析失败/无流一律判 `valid:false` |
+| B3/A01/A02 | P1 | MITM 链路只查 `codec_type` 不读 `codec_name`，AV1-in-MP4 被判通过且无告警/补救；v1.1.2 主链路修复未覆盖此处 | 复用 `utils/media.probeMedia` 统一判定；`MitmValidation` 增编码/可播放性字段；下载完成即探测并写回任务；**默认自动转码为 H.264+AAC**（`MITM_AUTO_REPAIR=0` 可关闭仅标记），并提供手动 `repair` 入口。原「仅标记 + 手动修复」经复验仍属 API 契约假成功，已补齐 |
+| A01/A04 | P1 | `store.run` 未传 `ffprobeBin`；`revalidate` 结果不写回任务 → 前端轮询读到旧校验 | 贯通 ffprobe 参数；`revalidate` 写回 `t.validation` 并 persist |
+| — | P1 | `db.ts` 的 `updateStmt` 漏 `SET media=@media` → v1.1.2 探测结果重启即丢失（better-sqlite3 静默忽略多余绑定） | 补齐 `media=@media`，单测验证 insert/update 双路径持久化 |
+| A06 | **P0** | `/api/mitm/*` 无鉴权且接受任意 http(s) URL，`requestOnce`/重定向无 host 校验 → SSRF（内网/云元数据）；用户 headers 可注入凭证 | 新增 `mitm/safety.ts`：私有网段/元数据拒绝、重定向每跳校验、请求头键白名单；环回默认放行（fixture/桥接依赖），可设 `MITM_BLOCK_LOOPBACK=1` 收紧 |
+| [01] | **P0** | `getAllowedBases()` 把用户可控 `saveDir` 纳入白名单 → 越权读任意目录；`createTask` 无校验即 `ensureDir` 任意目录 | 新增 `utils/pathSafety.ts`（含 realpath 防符号链接绕过），白名单仅来自服务端配置 + `ALLOWED_EXTRA_DIRS`；`createTask` 前置 `assertSafeSaveDir` |
+| A07/A12/A13 | P1 | `remove(deleteFile)` 无路径白名单；协作式 cancel 后 retry 可致同一 id 双 run；删除后 `renameSync` 复活产物 | `running`/`removed` 集合 + 路径白名单 + `.part` 清理 + run().finally 清理复活文件 |
+| [04] | P1 | `onComplete` async 化后 `startQueue` 在 ffprobe/转码之后 → 阻塞后续任务入队 | 槽位释放与 `startQueue` 提前，探测/修复异步后置并二次持久化 |
+| A09 | P2 | `bridge/download` 绕过分享页拦截 | 与 `/tasks` 一致加 `isSharePage` 校验 |
+| C1/C2 | P1 | `web/dist` 陈旧 + `vite base:'./'` 深路由刷新白屏 | `npm run start` 先构建前端；`base:'/'`；已重建 dist |
+| C5 | P2 | History 单值 `repairingId` 并发覆盖 | 改为 `Set<string>` |
+| N01 | P2 | ffprobe 由「可选」变「强制前置」，缺 ffprobe 环境所有合法产物都会 `VALIDATION_FAILED` | 区分「工具缺失」与「产物非法」：工具缺失时保留 `valid:true` 但 `codecChecked:false` + 明确 notes |
+| N04 | P2 | `downloader.ts` 注释曾自称 `v1.1.3`，与版本号不一致 | 已随本轮统一 bump 至 `1.1.3`，config/package.json 三处版本与注释一致 |
+| C15 | P3 | `.env.example` 缺 7 项配置开关 | 补齐 `FFPROBE_PATH` / `AUTO_REPAIR_INCOMPATIBLE` / `SIMULATE_USE_FFMPEG` / `REQUEST_TIMEOUT` / `ALLOWED_EXTRA_DIRS` / `MITM_AUTO_REPAIR` / `MITM_BLOCK_LOOPBACK` |
+| — | P2 | MITM「修复」按钮在产物文件已被删除时仍显示，点击必然 404 | 显示条件增加 `!!task.filePath` 校验 |
+| C9 | P2 | MITM 播放弹窗无 `onError` | 增加播放失败提示 + 编码/可播放性展示 + 不兼容告警 + 「修复」按钮 |
+| [09] | **P1** | `engine/ytdlp.ts` 的 `fallbackMerge` 用 `execSync` 拼接 shell 字符串（含 `target`/`file` 文件名）→ 攻击者可借视频标题/分片名中的 `"` 逃逸执行任意命令 | 彻底移除 `execSync`：`fallbackMerge` 改用 `spawnSync(args[], {shell:false})`；`resolveBin` 改为纯 `fs` PATH 扫描（无 shell）；新增命令注入负向单测 |
+| [10]/XM-01 | **P1** | `index.ts` `cors()` 默认 `origin:'*'` 且 `/api`（含 `/api/mitm/*`）全无鉴权 → 一旦暴露到网络即任意调用 | CORS 收紧为仅同源/localhost（可配 `CORS_ORIGINS` 显式白名单）；默认监听 `127.0.0.1`（可配 `HOST`）；新增可选 `API_TOKEN`：配置后 `/api` 全路由强制 `Authorization: Bearer` 或 `x-api-token`，仅 `/api/health` 免鉴 |
+| [11] | P1 | `platforms.ts`/`ytdlp.ts` 用 `host.includes(h)` 匹配平台 → `notyoutube.com` 被误判为 youtube 并通过 `validateUrl` 的「受支持平台」校验（仿冒域名绕过） | 改为 `host === h \|\| host.endsWith('.' + h)` 精确/子域匹配，杜绝子串仿冒 |
+
+### 前端新增
+- `web/src/api.ts` 增 `mitm.repair(id)`；`Mitm.tsx` 增编码信息展示、不兼容告警与一键修复；`web/src/types.ts` 的 `MitmValidation` 与后端对齐。
+- 后端新增 `POST /api/mitm/tasks/:id/repair`（原文件保留为 `.original.<ext>`）。
+
+### 验证
+- `npm run typecheck` / `npm --prefix web run build`：退出码 0。
+- 单元/工具层 **17/17 PASS**：media insert/update 持久化、路径白名单（含符号链接）、SSRF 拦截与环回放行、请求头过滤、ffprobe 缺失回退、AV1 探测、命令注入负向校验（无 shell 拼接）。
+- HTTP 端到端 **33/33 PASS**：正常下载/桥接委派/Range 206/416、异常（分享页、伪造 CDN、text/html、伪装 mp4、非法 URL、未知任务）、边界（0 字节、无 ftyp 假 MP4、AV1 不可播放、4 并发）、安全（SSRF ×3、headers 注入、桥接分享页、CORS 仅同源/localhost 拒绝跨域、API_TOKEN 缺失 401）、修复链路（AV1→H.264 `repaired:true`）。
+- 历史数据回填：重启服务触发 `backfillValidations()`，14 条 AV1 历史任务全部转 H.264（`completed+av1+未修复=0`）。
+- 视频号「真实内容」端到端仍受环境前置限制：需登录态微信客户端 + 系统代理 + 受信任 CA + 实际播放才能抓到 `wxapp.tc.qq.com` 直链；本轮素材为内置确定性源，未冒充真实内容。
+
+### 新增/补齐配置
+`ALLOWED_EXTRA_DIRS`、`MITM_BLOCK_LOOPBACK=1`、`MITM_AUTO_REPAIR=0`、`FFPROBE_PATH`、`AUTO_REPAIR_INCOMPATIBLE`、`SIMULATE_USE_FFMPEG`、`REQUEST_TIMEOUT`、`MITM_FFPROBE_PATH`（上述已在 v1.1.2 诊断期补齐）；**本轮新增**：`HOST`（默认 `127.0.0.1`，公网部署改 `0.0.0.0` 并务必配合下方两项）、`API_TOKEN`（留空=本地信任免鉴权；设置后 `/api` 全路由强制令牌）、`CORS_ORIGINS`（逗号分隔显式跨域白名单，留空=仅同源/localhost）。`.env.example` 已补齐全部。
+
+---
+
 ## v1.1.1 — 分享页误判修复 + 桥接端到端验证（2026-11-04）
 
 ### 修复（缺陷）

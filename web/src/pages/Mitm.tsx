@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { clsx } from 'clsx';
 import { api, ApiRequestError } from '../api';
 import type { MitmDownloader, MitmStatus, MitmTask, MitmProbe, MitmPlatform } from '../types';
@@ -19,11 +19,18 @@ export function Mitm() {
   const [probing, setProbing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [selftesting, setSelftesting] = useState<string | null>(null);
-  const [playTask, setPlayTask] = useState<MitmTask | null>(null);
+  const [playTaskId, setPlayTaskId] = useState<string | null>(null);
 
   const status = usePolling<MitmStatus>(() => api.mitm.status(), 6000);
   const downloaders = usePolling<{ downloaders: MitmDownloader[] }>(() => api.mitm.downloaders(), 8000);
   const tasks = usePolling<{ tasks: MitmTask[] }>(() => api.mitm.tasks(), 1200);
+
+  // 播放弹窗只存 id，任务对象从轮询数据派生：修复/重新校验后弹窗内的
+  // 编码、大小、校验状态会随轮询实时更新，而不是停留在打开时的旧快照。
+  const playTask = useMemo(
+    () => (tasks.data?.tasks ?? []).find((t) => t.id === playTaskId) ?? null,
+    [tasks.data, playTaskId]
+  );
 
   const doProbe = useCallback(async (raw: string) => {
     if (!raw.trim() || !/^https?:\/\//i.test(raw.trim())) {
@@ -235,13 +242,13 @@ export function Mitm() {
       ) : (
         <div className="space-y-3">
           {list.map((t) => (
-            <TaskRow key={t.id} task={t} onPlay={() => setPlayTask(t)} onChange={() => tasks.refresh()} />
+            <TaskRow key={t.id} task={t} onPlay={() => setPlayTaskId(t.id)} onChange={() => tasks.refresh()} />
           ))}
         </div>
       )}
 
       {/* 播放弹窗 */}
-      <Modal open={!!playTask} onClose={() => setPlayTask(null)} title={playTask?.title} size="lg">
+      <Modal open={!!playTaskId} onClose={() => setPlayTaskId(null)} title={playTask?.title ?? '视频预览'} size="lg">
         {playTask && (
           <div>
             <video
@@ -250,13 +257,37 @@ export function Mitm() {
               autoPlay
               className="w-full rounded-lg bg-black"
               style={{ maxHeight: '60vh' }}
+              onError={() => toast('视频加载失败：文件可能已损坏或编码不被当前播放器支持，请在任务列表重新校验或执行修复', 'error')}
             />
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
               <Info label="平台" value={playTask.platformName} />
               <Info label="大小" value={formatBytes(playTask.fileSizeBytes)} />
-              <Info label="产物校验" value={playTask.validation?.valid ? '通过' : '—'} ok={playTask.validation?.valid} />
+              <Info label="结构校验" value={playTask.validation?.valid ? '通过' : '未通过'} ok={playTask.validation?.valid} />
               <Info label="音视频流" value={playTask.validation?.ffprobe || '—'} />
+              <Info label="视频编码" value={playTask.validation?.videoCodec?.toUpperCase() || '—'} />
+              <Info
+                label="可播放性"
+                value={
+                  playTask.validation?.playerCompatible === false
+                    ? '不兼容'
+                    : playTask.validation?.repaired
+                      ? '已修复'
+                      : playTask.validation?.playerCompatible == null
+                        ? '未校验'
+                        : '正常'
+                }
+                ok={playTask.validation?.playerCompatible === true}
+              />
             </div>
+            {playTask.validation?.playerCompatible === false && (
+              <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                <Icon name="alert" size={14} className="mt-0.5 shrink-0" />
+                <span>
+                  {playTask.validation.notes || '编码不兼容，部分播放器（如 QuickTime）可能无法播放'}，
+                  可在任务列表点击「修复」转码为 H.264+AAC。
+                </span>
+              </p>
+            )}
             {playTask.validation?.headerHex && (
               <p className="mt-2 break-all font-mono text-[10px] text-slate-400">magic: {playTask.validation.headerHex.slice(0, 24)}</p>
             )}
@@ -313,8 +344,15 @@ const STATUS_LABEL: Record<string, { label: string; tone: 'neutral' | 'brand' | 
 
 function TaskRow({ task, onPlay, onChange }: { task: MitmTask; onPlay: () => void; onChange: () => void }) {
   const { toast } = useToast();
+  const [repairing, setRepairing] = useState(false);
   const st = STATUS_LABEL[task.status] ?? STATUS_LABEL.waiting;
   const busy = task.status === 'waiting' || task.status === 'downloading';
+  // 后端 repair 要求 filePath 存在（router.ts 会检查 fs.existsSync）；
+  // 文件被用户删除后不应再显示修复按钮，否则点击必然 404。
+  const incompatible =
+    task.status === 'completed' &&
+    !!task.filePath &&
+    task.validation?.playerCompatible === false;
 
   const act = async (fn: () => Promise<unknown>, msg: string) => {
     try { await fn(); toast(msg, 'success'); onChange(); }
@@ -347,10 +385,31 @@ function TaskRow({ task, onPlay, onChange }: { task: MitmTask; onPlay: () => voi
               {task.errorCode}: {task.errorMessage}
             </p>
           )}
+          {incompatible && (
+            <p className="mt-1 flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+              <Icon name="alert" size={12} />
+              编码不兼容（{task.validation?.videoCodec?.toUpperCase()}/{task.validation?.container?.toUpperCase()}），部分播放器无法播放
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 flex-wrap gap-1.5">
           {task.status === 'completed' && (
             <Button size="sm" variant="secondary" onClick={onPlay} icon={<Icon name="play" size={14} />}>播放</Button>
+          )}
+          {incompatible && (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={repairing}
+              icon={<Icon name="wrench" size={14} />}
+              title="转码为 H.264+AAC 可播放格式"
+              onClick={() => act(async () => {
+                setRepairing(true);
+                try { await api.mitm.repair(task.id); } finally { setRepairing(false); }
+              }, '已修复为 H.264 可播放格式')}
+            >
+              {repairing ? '修复中…' : '修复'}
+            </Button>
           )}
           {busy && (
             <Button size="sm" variant="ghost" onClick={() => act(() => api.mitm.cancel(task.id), '已取消')} icon={<Icon name="pause" size={14} />}>取消</Button>
