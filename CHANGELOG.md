@@ -94,6 +94,31 @@
 
 ---
 
+## v1.1.4 — 审计遗留修复：暂停续传 / 流监听 / 重试残留 / 取消竞态（2026-11-05）
+
+> 范围：继续收口代码审查（/tmp/audit_server.md）遗留项，聚焦状态机与文件生命周期一致性、流健壮性。
+> 版本号 bump 至 `1.1.4`，已提交并 push。
+
+### 修复内容（对应审计编号）
+
+| 编号 | 严重度 | 问题 / 根因 | 修复 |
+|---|---|---|---|
+| [06] | P1 | `startDownload` 续传判定用 `status==='paused'`，而 `resume()` 先把状态置为 `'waiting'` → `isResume` 恒 false，续传形同虚设；且 `runFallback` 用 `fs.existsSync` 决定 `'a'/'w'`，非续传重开时残留文件被 `'a'` 追加 → 体积翻倍、前半重复 | 续传判定改为依据「已下载字节 > 0」（暂停恢复、重启恢复保留该值；重试/新建清零）；`runFallback` 仅在「确为续传请求且目标真实存在且足够大」时用 `'a'` 追加，否则 `'w'` 截断 |
+| [07] | P1 | `retry()` 重置 `downloadedBytes` 但不删残留目标文件；`remove(deleteFile)` 只删 `task.filePath`（下载中为空）→ 半成品永久残留；yt-dlp 遇已存在目标判「already downloaded」并以退出码 0 走假成功 | 新增 `cleanupTargetFiles()` 在 `retry()`/`remove()` 时清理目标与 `.f*`/`.part` 分片；`ytdlp` 引擎增加 `--force-overwrites` 双保险 |
+| [08] | P1 | 模拟引擎写流、文件流接口读流、MITM 读流均无 `'error'` 监听 → 播放期间文件被删/磁盘写满/权限变化触发未捕获异常杀死进程 | 写流补 `error` 监听 + reject 清理半成品；读流补 `error` 监听与「客户端断开（res close）→ 销毁读流」清理 |
+| [04] | P1 | `onComplete` async 化后同步落库段未受 `try` 保护且 `.then` 链 `void` 无 `.catch` → `save()` 异常时 `unhandledRejection` 可终止进程 | 完成态落库整体包进 `try/catch/finally`，保证 `active` 槽释放与队列推进；`onComplete` 不再向外抛错 |
+| [13] | P2 | 下载最终完成时若用户已取消，`onComplete` 不读/不清 `desiredMap` → 取消被吞、任务显示已完成，且 `desiredMap` 泄漏 | `onComplete` 开头读取并清理 `desiredMap`；命中 `'cancelled'` 时尊重取消意图（丢弃产物、标记 cancelled） |
+
+### 验证
+- `npm run typecheck`（server + web）：退出码 0。
+- `server/test/api.test.ts`：暂停→继续→取消全链路通过；新增「取消后 filePath 为空」「取消后删文件清理残留」断言，验证 [07]/[13] 的产物清理与取消语义。续传不翻倍 / 重试清理等文件级断言因依赖 ffmpeg 是否安装与限速时序，保留为手动验证项以避免 CI 抖动。
+- `npm run build`（server + web）：产出 `vdm-server@1.1.4`。
+
+### 版本号
+`package.json` / `server/package.json` / `web/package.json` / `config.version` / `docker-compose.yml` 镜像 tag：`1.1.3` → `1.1.4`。
+
+---
+
 ## v1.1.1 — 分享页误判修复 + 桥接端到端验证（2026-11-04）
 
 ### 修复（缺陷）

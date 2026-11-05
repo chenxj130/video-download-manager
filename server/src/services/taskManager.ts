@@ -190,7 +190,10 @@ class TaskManager {
   }
 
   private startDownload(task: DownloadTask): void {
-    const isResume = task.status === 'paused' && task.downloadedBytes > 0;
+    // [06] 续传判定的唯一可靠依据是「已下载字节 > 0」（暂停态恢复、重启恢复均保留该值；
+    // 重试/新建任务都会把它清零）。旧实现用 status==='paused' 判定，而 resume() 会先把状态
+    // 置为 'waiting'，导致 isResume 恒为 false、续传形同虚设、文件以 'a' 追加翻倍。
+    const isResume = task.downloadedBytes > 0;
     task.status = 'downloading';
     task.startedAt = task.startedAt ?? new Date().toISOString();
     if (!isResume) {
@@ -244,25 +247,48 @@ class TaskManager {
   private async onComplete(id: string, filePath: string, fileSize: number): Promise<void> {
     const task = this.tasks.get(id);
     if (!task) return;
-    task.status = 'completed';
-    task.filePath = filePath;
-    task.fileName = path.basename(filePath);
-    task.fileSizeBytes = fileSize || task.fileSizeBytes;
-    task.downloadedBytes = task.fileSizeBytes;
-    task.progress = 100;
-    task.speedBytesPerSec = 0;
-    task.etaSeconds = 0;
-    task.completedAt = new Date().toISOString();
 
-    // 先释放下载槽并推进队列：ffprobe / 转码可能耗时数十秒（尤其软件解码 AV1），
-    // 不能让它阻塞后续等待任务的入队。
-    this.active.delete(id);
-    this.save(task);
-    logger.info(`下载完成 ${id} -> ${task.filePath}`);
-    this.startQueue();
+    // [13] 竞态清理：若用户在下载最终完成时按下取消，尊重取消意图（避免「取消被吞、任务仍显示已完成」）；
+    // 同时清理 desiredMap，避免 Map 泄漏。暂停态在下载已完成时无法再暂停，按已完成处理。
+    const desired = this.desiredMap.get(id);
+    this.desiredMap.delete(id);
+    if (desired === 'cancelled') {
+      this.active.delete(id);
+      removeFileSafe(filePath);
+      task.status = 'cancelled';
+      task.filePath = '';
+      task.speedBytesPerSec = 0;
+      this.save(task);
+      logger.info(`下载完成但用户已取消，丢弃产物 ${id}`);
+      this.startQueue();
+      return;
+    }
+
+    // 完成态落库：先释放下载槽并推进队列——ffprobe / 转码可能耗时数十秒（尤其软件解码 AV1），
+    // 不能让它阻塞后续等待任务的入队。整段包在 try/catch/finally 中（[04]），
+    // 即便落库异常（磁盘满/只读）也保证 active 槽释放、队列推进，杜绝 unhandledRejection 与槽位泄漏。
+    try {
+      task.status = 'completed';
+      task.filePath = filePath;
+      task.fileName = path.basename(filePath);
+      task.fileSizeBytes = fileSize || task.fileSizeBytes;
+      task.downloadedBytes = task.fileSizeBytes;
+      task.progress = 100;
+      task.speedBytesPerSec = 0;
+      task.etaSeconds = 0;
+      task.completedAt = new Date().toISOString();
+      this.active.delete(id);
+      this.save(task);
+      logger.info(`下载完成 ${id} -> ${task.filePath}`);
+    } catch (e) {
+      logger.error(`onComplete 完成态落库失败 ${id}: ${(e as Error).message}`);
+      this.active.delete(id);
+    } finally {
+      this.startQueue();
+    }
 
     // 下载后媒体校验：探测编码与可播放性；不兼容时按配置自动转码修复，
-    // 从源头消除「下载完成但无法播放」的复现风险。异步执行，不阻塞队列。
+    // 从源头消除「下载完成但无法播放」的复现风险。异步执行，不阻塞队列；其内部已 try/catch。
     if (task.format !== 'mp3' && task.format !== 'm4a') {
       try {
         const media = await probeMedia(filePath);
@@ -403,6 +429,9 @@ class TaskManager {
     if (task.status !== 'failed' && task.status !== 'cancelled') {
       throw new ApiError('INVALID_URL', '仅失败/已取消的任务可以重试', 400);
     }
+    // [07] 重试前清理上次失败遗留的半成品目标文件与 DASH 分片，避免 yt-dlp 因目标已存在而
+    // 误判「already downloaded」并以退出码 0 走假成功；配合 ytdlp 的 --force-overwrites 双保险。
+    this.cleanupTargetFiles(task);
     task.status = 'waiting';
     task.downloadedBytes = 0;
     task.progress = 0;
@@ -424,8 +453,11 @@ class TaskManager {
         a.abort.abort();
       }
     }
-    if (deleteFile && task.filePath && fs.existsSync(task.filePath)) {
-      removeFileSafe(task.filePath);
+    if (deleteFile) {
+      // [07] 下载中/等待态 filePath 为空，需按 fileName 兜底清理目标文件与分片，
+      // 否则半成品文件会永久残留（旧实现只删 task.filePath，导致删文件无效）。
+      if (task.filePath) removeFileSafe(task.filePath);
+      this.cleanupTargetFiles(task);
     }
     this.active.delete(id);
     this.desiredMap.delete(id);
@@ -433,6 +465,27 @@ class TaskManager {
     deleteTaskRow(id);
     logger.info(`已删除任务 ${id} (删文件=${deleteFile})`);
     this.startQueue();
+  }
+
+  /**
+   * [07] 清理下载目标文件及其遗留的分流碎片（yt-dlp 的 .f* / .part）。
+   * 用于重试/删除时回收半成品，避免残留文件被误判为已完成或累积垃圾。
+   */
+  private cleanupTargetFiles(task: DownloadTask): void {
+    const target = path.join(task.saveDir, task.fileName);
+    removeFileSafe(target);
+    const base = task.fileName.slice(0, task.fileName.lastIndexOf('.'));
+    if (!base) return;
+    try {
+      for (const f of fs.readdirSync(task.saveDir)) {
+        if (f === task.fileName) continue;
+        if (f.startsWith(base + '.f') || f.startsWith(base + '.part') || f.endsWith('.part')) {
+          removeFileSafe(path.join(task.saveDir, f));
+        }
+      }
+    } catch {
+      /* 目录不可读时忽略 */
+    }
   }
 
   /** 删除已下载文件（不影响任务记录） */

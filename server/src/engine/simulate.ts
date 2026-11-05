@@ -243,11 +243,17 @@ class SimulateDownload implements DownloadHandle {
     return this.runFallback(filePath, total);
   }
 
-  private async runFallback(filePath: string, total: number): Promise<DownloadResult> {
-    const { task, startBytes, maxSpeedBytesPerSec, signal, onProgress } = this.ctx;
-    const flag = fs.existsSync(filePath) ? 'a' : 'w';
+  private runFallback(filePath: string, total: number): Promise<DownloadResult> {
+    const { task, startBytes, resume, maxSpeedBytesPerSec, signal, onProgress } = this.ctx;
+    // [06] 续传判定以「已下载字节 > 0 且确为续传请求 且 目标文件真实存在且足够大」为准；
+    // 不再用 fs.existsSync(filePath) 决定 'a'/'w'——旧逻辑在「非续传重开」时会因残留文件
+    // 误用 'a' 追加，导致文件体积翻倍、前半内容重复。
+    const fileExists = fs.existsSync(filePath);
+    const fileSize = fileExists ? fs.statSync(filePath).size : 0;
+    const shouldResume = startBytes > 0 && resume && fileExists && fileSize >= startBytes;
+    const flag = shouldResume ? 'a' : 'w';
     const stream = fs.createWriteStream(filePath, { flags: flag });
-    let written = startBytes;
+    let written = shouldResume ? fileSize : 0;
     // 模拟速度：4~10 MB/s，基于 id 确定性
     const baseSpeed = (4 + (hashString(task.id) % 60) / 10) * 1024 * 1024;
     const speed = maxSpeedBytesPerSec > 0 ? Math.min(baseSpeed, maxSpeedBytesPerSec) : baseSpeed;
@@ -257,37 +263,61 @@ class SimulateDownload implements DownloadHandle {
     const tickMs = 60;
     const startedAt = Date.now();
 
-    try {
-      while (written < total) {
-        if (signal.aborted) {
-          stream.end();
-          throw new AbortError();
+    return new Promise<DownloadResult>((resolve, reject) => {
+      // [08] 写流缺少 'error' 监听会在磁盘写满/EPERM 时成为未捕获异常并杀死进程；
+      // 这里用显式 error 处理器在写入失败时 reject 并清理半成品。
+      let settled = false;
+      const fail = (e: Error) => {
+        if (settled) return;
+        settled = true;
+        try {
+          stream.destroy();
+        } catch {
+          /* ignore */
         }
-        const now = Date.now();
-        const elapsed = (now - startedAt) / 1000;
-        const target = Math.min(total, Math.floor(speed * elapsed) + startBytes);
-        const toWrite = Math.min(chunkSize, target - written);
-        if (toWrite > 0) {
-          const buf = Buffer.alloc(toWrite, 0x42);
-          await writeAsync(stream, buf);
-          written += toWrite;
-        } else {
-          await delay(tickMs);
+        reject(e);
+      };
+      const done = (r: DownloadResult) => {
+        if (settled) return;
+        settled = true;
+        resolve(r);
+      };
+      stream.on('error', (e) => fail(e as Error));
+
+      const tick = async () => {
+        try {
+          while (written < total) {
+            if (signal.aborted) {
+              stream.end();
+              throw new AbortError();
+            }
+            const now = Date.now();
+            const elapsed = (now - startedAt) / 1000;
+            const target = Math.min(total, Math.floor(speed * elapsed) + startBytes);
+            const toWrite = Math.min(chunkSize, target - written);
+            if (toWrite > 0) {
+              const buf = Buffer.alloc(toWrite, 0x42);
+              await writeAsync(stream, buf);
+              written += toWrite;
+            } else {
+              await delay(tickMs);
+            }
+            onProgress({
+              downloadedBytes: written,
+              fileSizeBytes: total,
+              speedBytesPerSec: speed,
+              etaSeconds: speed > 0 ? Math.ceil((total - written) / speed) : undefined,
+            });
+            await delay(tickMs);
+          }
+          await endAsync(stream);
+          done({ filePath, fileSizeBytes: written });
+        } catch (err) {
+          fail(err instanceof Error ? err : new Error(String(err)));
         }
-        onProgress({
-          downloadedBytes: written,
-          fileSizeBytes: total,
-          speedBytesPerSec: speed,
-          etaSeconds: speed > 0 ? Math.ceil((total - written) / speed) : undefined,
-        });
-        await delay(tickMs);
-      }
-      await endAsync(stream);
-      return { filePath, fileSizeBytes: written };
-    } catch (err) {
-      stream.destroy();
-      throw err;
-    }
+      };
+      void tick();
+    });
   }
 }
 

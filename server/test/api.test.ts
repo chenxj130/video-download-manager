@@ -158,6 +158,12 @@ async function main() {
   const ca = await req('POST', `/api/tasks/${id2}/cancel`);
   const cancelled = await waitFor(id2, (t) => t.status === 'cancelled', 8000);
   check('取消成功', ca.status === 200 && cancelled?.status === 'cancelled');
+  // [07]/[13] 取消应清理产物：下载中 filePath 为空，DELETE ?deleteFile=true 按 fileName 兜底清理残留
+  check('取消后 filePath 为空', cancelled?.filePath === '');
+  const fsMod = await import('node:fs');
+  const c2path = `${cancelled.saveDir}/${cancelled.fileName}`;
+  await req('DELETE', `/api/tasks/${id2}?deleteFile=true`);
+  check('取消后删文件清理残留半成品', !fsMod.existsSync(c2path), c2path);
   await req('PUT', '/api/settings', { maxSpeedBytesPerSec: 0 }); // 恢复不限速
 
   // 10. 历史 / 看板 / 设置 / 系统

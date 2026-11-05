@@ -230,6 +230,9 @@ class YtDlpDownload implements DownloadHandle {
         target,
         '--newline',
         '--no-warnings',
+        // [07] 重试时目标文件可能仍残留（上次失败的不完整产物），--force-overwrites
+        // 确保 yt-dlp 覆盖而非因「already downloaded」直接退出 0 走假成功。
+        '--force-overwrites',
         '--ffmpeg-location',
         resolveBin(config.ffmpegBin),
         // HLS(m3u8) 流改用 ffmpeg 拉取，比默认 hlsnative 容错更强，避免分片中断导致整段失败（X/Twitter 尤为明显）
@@ -264,6 +267,9 @@ class YtDlpDownload implements DownloadHandle {
       target,
       '--newline',
       '--no-warnings',
+      // [07] 重试时目标文件可能仍残留（上次失败的不完整产物），--force-overwrites
+      // 确保 yt-dlp 覆盖而非因「already downloaded」直接退出 0 走假成功。
+      '--force-overwrites',
       '--ffmpeg-location',
       resolveBin(config.ffmpegBin),
       // 用确定性模板输出进度，避免解析人类可读文本时因语言/单位差异失配。

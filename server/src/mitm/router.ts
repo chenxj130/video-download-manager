@@ -214,11 +214,43 @@ router.get(
         'Content-Length': String(end - start + 1),
         'Content-Type': mime,
       });
-      fs.createReadStream(normalized, { start, end }).pipe(res);
+      // [08] 读流补 error 监听，避免播放期间文件被删除/权限变化时未捕获异常杀死进程。
+      const rs = fs.createReadStream(normalized, { start, end });
+      rs.on('error', () => {
+        try {
+          res.destroy();
+        } catch {
+          /* ignore */
+        }
+      });
+      res.on('close', () => {
+        try {
+          rs.destroy();
+        } catch {
+          /* ignore */
+        }
+      });
+      rs.pipe(res);
       return;
     }
     res.set({ 'Content-Length': String(stat.size), 'Content-Type': mime, 'Accept-Ranges': 'bytes' });
-    fs.createReadStream(normalized).pipe(res);
+    // [08] 同上，全量读流补 error 监听与客户端断开清理。
+    const rsFull = fs.createReadStream(normalized);
+    rsFull.on('error', () => {
+      try {
+        res.destroy();
+      } catch {
+        /* ignore */
+      }
+    });
+    res.on('close', () => {
+      try {
+        rsFull.destroy();
+      } catch {
+        /* ignore */
+      }
+    });
+    rsFull.pipe(res);
   })
 );
 

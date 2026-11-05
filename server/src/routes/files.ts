@@ -5,6 +5,7 @@ import { taskManager } from '../services/taskManager.js';
 import { isPathAllowed } from '../utils/pathSafety.js';
 import { ApiError } from '../utils/errors.js';
 import { wrap } from './_helpers.js';
+import { logger } from '../utils/logger.js';
 
 const router: Router = Router();
 
@@ -32,6 +33,28 @@ function sendVideo(req: import('express').Request, res: import('express').Respon
   const mime = mimeFromExt(path.extname(filePath));
   const range = req.headers.range;
 
+  // [08] 读流缺少 'error' 监听会在播放期间文件被删除/权限变化时成为未捕获异常并杀死进程；
+  // 同时监听客户端断开（res close）以尽早停止读取，释放文件句柄。
+  const pipeSafe = (rs: fs.ReadStream): void => {
+    rs.on('error', (e) => {
+      logger.error(`视频流读取失败 ${path.basename(filePath)}: ${(e as Error).message}`);
+      try {
+        if (!res.headersSent) res.status(500).end();
+        else res.end();
+      } catch {
+        /* ignore */
+      }
+    });
+    res.on('close', () => {
+      try {
+        rs.destroy();
+      } catch {
+        /* ignore */
+      }
+    });
+    rs.pipe(res);
+  };
+
   if (range) {
     const raw = range.replace(/bytes=/, '').split('-');
     const start = parseInt(raw[0], 10);
@@ -48,7 +71,7 @@ function sendVideo(req: import('express').Request, res: import('express').Respon
       'Content-Length': chunkSize,
       'Content-Type': mime,
     });
-    fs.createReadStream(filePath, { start, end }).pipe(res);
+    pipeSafe(fs.createReadStream(filePath, { start, end }));
     return;
   }
 
@@ -57,7 +80,7 @@ function sendVideo(req: import('express').Request, res: import('express').Respon
     'Content-Type': mime,
     'Accept-Ranges': 'bytes',
   });
-  fs.createReadStream(filePath).pipe(res);
+  pipeSafe(fs.createReadStream(filePath));
 }
 
 /** 获取任务的本地文件流（支持 Range，用于浏览器 <video> 预览） */

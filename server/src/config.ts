@@ -86,7 +86,7 @@ export const config = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
-  version: '1.1.3',
+  version: '1.1.4',
   /** MITM 嗅探下载接入层（与现有功能完全隔离） */
   mitm: {
     /** 是否启用接入层；默认开启 */

@@ -5,6 +5,7 @@ web/node_modules/
 
 # 构建产物
 web/dist/
+server/dist/
 *.tsbuildinfo
 
 # 运行时数据（保留目录结构，忽略内容）
