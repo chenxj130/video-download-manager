@@ -54,6 +54,16 @@ export const config = {
   /** ffprobe 可执行文件：可为命令名（走 PATH）或绝对路径，用于下载后媒体编码探测 */
   ffprobeBin: process.env.FFPROBE_PATH ?? 'ffprobe',
   /**
+   * 透传给 yt-dlp 的 cookie 来源，用于突破 B 站 / 部分平台「需登录才放高清档」的反爬限制。
+   * - YTDLP_COOKIES_FROM_BROWSER：浏览器名，如 chrome / firefox / safari / edge / brave。
+   *   会从该浏览器已登录会话读取 cookie（浏览器需完全退出或允许读取其 cookie 数据库）。
+   * - YTDLP_COOKIES：Netscape 格式 cookie 文件绝对路径（可用浏览器插件导出）。
+   * 二者皆留空 = 不附加 cookie（匿名档，B 站通常仅 360p/480p，1080p+ 不可见）。
+   * 该能力默认关闭，仅当显式配置时才注入，避免对无 cookie 需求的平台产生副作用。
+   */
+  cookiesFromBrowser: (process.env.YTDLP_COOKIES_FROM_BROWSER ?? '').trim(),
+  cookiesFile: (process.env.YTDLP_COOKIES ?? '').trim(),
+  /**
    * 额外允许的保存/读取目录（逗号分隔的绝对路径）。默认仅 config.downloadDir。
    * 用于替代「把用户提交的 saveDir 直接加入白名单」这一越权读漏洞的显式授权通道。
    */

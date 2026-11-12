@@ -37,6 +37,17 @@ function resolveBin(name: string): string {
   return name; // 兜底：原样返回，交由 spawn 自行报错
 }
 
+/**
+ * 构造 cookie 透传参数。仅当显式配置了 YTDLP_COOKIES（Netscape 文件）或
+ * YTDLP_COOKIES_FROM_BROWSER（浏览器名）时才返回非空数组；否则返回 []。
+ * 默认关闭，对匿名下载零影响，专用于突破 B 站等「需登录才放高清档」的反爬限制。
+ */
+function cookieArgs(): string[] {
+  if (config.cookiesFile) return ['--cookies', config.cookiesFile];
+  if (config.cookiesFromBrowser) return ['--cookies-from-browser', config.cookiesFromBrowser];
+  return [];
+}
+
 /** 仅当系统已安装 yt-dlp + ffmpeg 时使用的真实下载引擎 */
 export class YtDlpEngine implements VideoEngine {
   name = 'ytdlp';
@@ -59,7 +70,7 @@ export class YtDlpEngine implements VideoEngine {
   async parse(url: string): Promise<VideoMetadata> {
     let raw: string;
     try {
-      raw = await this.exec(['-J', '--no-warnings', url]);
+      raw = await this.exec([...cookieArgs(), '-J', '--no-warnings', url]);
     } catch (e) {
       const mapped = mapEngineError(e);
       throw new ApiError(mapped.code, mapped.message, mapped.code === 'VIDEO_NOT_FOUND' ? 404 : 400);
@@ -239,6 +250,7 @@ class YtDlpDownload implements DownloadHandle {
         '--hls-prefer-ffmpeg',
         '--progress-template',
         'download:__VDM__ %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s %(progress.speed)s %(progress.eta)s',
+        ...cookieArgs(),
         task.url,
       ];
       if (maxSpeedBytesPerSec > 0) {
@@ -276,6 +288,8 @@ class YtDlpDownload implements DownloadHandle {
       // yt-dlp 的进度默认写入 stdout，下方同时监听 stdout 与 stderr。
       '--progress-template',
       'download:__VDM__ %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s %(progress.speed)s %(progress.eta)s',
+      // 与 parse / 音频抽取分支一致：注入登录 cookie，才有资格命中 B 站 1080p+ 等登录档流。
+      ...cookieArgs(),
       task.url,
     ];
     if (maxSpeedBytesPerSec > 0) {
