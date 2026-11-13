@@ -402,6 +402,22 @@ function TaskRow({
                     </Button>
                     <Button
                       size="sm"
+                      variant="primary"
+                      onClick={() => {
+                        const a = document.createElement('a');
+                        a.href = `/api/files/${task.id}/download`;
+                        a.download = task.fileName || 'video.mp4';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                      }}
+                      icon={<Icon name="download" size={14} />}
+                      title="下载并保存到本地 Mac 电脑"
+                    >
+                      保存到本地
+                    </Button>
+                    <Button
+                      size="sm"
                       variant="secondary"
                       onClick={onOpenFolder}
                       icon={<Icon name="folder" size={14} />}

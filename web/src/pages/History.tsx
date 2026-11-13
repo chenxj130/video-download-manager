@@ -190,20 +190,38 @@ export function History() {
                       </Button>
                     )}
                     {t.status === 'completed' && t.filePath && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={async () => {
-                          try {
-                            await api.openTaskFolder(t.id);
-                            toast('已打开所在目录', 'success');
-                          } catch (e) {
-                            toast((e as ApiRequestError).message || '打开目录失败', 'error');
-                          }
-                        }}
-                        icon={<Icon name="folder" size={14} />}
-                        title="打开所在目录"
-                      />
+                      <>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            const a = document.createElement('a');
+                            a.href = `/api/files/${t.id}/download`;
+                            a.download = t.fileName || 'video.mp4';
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                          }}
+                          icon={<Icon name="download" size={14} />}
+                          title="下载并保存到本地电脑"
+                        >
+                          保存到本地
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={async () => {
+                            try {
+                              await api.openTaskFolder(t.id);
+                              toast('已打开所在目录', 'success');
+                            } catch (e) {
+                              toast((e as ApiRequestError).message || '打开目录失败', 'error');
+                            }
+                          }}
+                          icon={<Icon name="folder" size={14} />}
+                          title="打开所在目录"
+                        />
+                      </>
                     )}
                     <Button
                       size="sm"

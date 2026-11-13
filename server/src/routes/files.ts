@@ -103,4 +103,29 @@ router.get(
   })
 );
 
+/** 浏览器直接下载视频到本地电脑（带 Content-Disposition 附件头，唤起系统下载） */
+router.get(
+  '/:id/download',
+  wrap(async (req, res) => {
+    const task = taskManager.getTask(req.params.id);
+    if (!task) throw new ApiError('TASK_NOT_FOUND', '任务不存在', 404);
+    if (!task.filePath) throw new ApiError('FILE_NOT_FOUND', '文件未生成', 404);
+
+    const filePath = path.resolve(task.filePath);
+    if (!isPathAllowed(filePath)) {
+      throw new ApiError('ACCESS_DENIED', '访问路径受限', 403);
+    }
+    if (!fs.existsSync(filePath)) {
+      throw new ApiError('FILE_NOT_FOUND', '文件不存在', 404);
+    }
+
+    const fileName = task.fileName || path.basename(filePath);
+    res.download(filePath, fileName, (err) => {
+      if (err && !res.headersSent) {
+        logger.error(`下载文件失败 ${fileName}: ${err.message}`);
+      }
+    });
+  })
+);
+
 export default router;

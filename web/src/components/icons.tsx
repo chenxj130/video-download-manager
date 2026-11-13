@@ -4,11 +4,12 @@ type IconName =
   | 'home' | 'tasks' | 'history' | 'dashboard' | 'settings'
   | 'sun' | 'moon' | 'plus' | 'pause' | 'play'
   | 'close' | 'retry' | 'trash' | 'folder' | 'search' | 'wrench'
-  | 'check' | 'alert' | 'drag' | 'wifi' | 'link' | 'chip' | 'gauge' | 'database' | 'disk' | 'radar';
+  | 'check' | 'alert' | 'drag' | 'wifi' | 'link' | 'chip' | 'gauge' | 'database' | 'disk' | 'radar' | 'download';
 
 const paths: Record<IconName, JSX.Element> = {
   home: <path d="M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5" />,
   tasks: <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16" />,
+  download: <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16" />,
   history: <path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4M12 8v4l3 2" />,
   dashboard: <path d="M4 20V10m6 10V4m6 16v-7" />,
   settings: (

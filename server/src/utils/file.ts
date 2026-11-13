@@ -102,6 +102,10 @@ export async function openFolder(dir: string): Promise<void> {
   if (!fs.existsSync(normalized) || !fs.statSync(normalized).isDirectory()) {
     throw new Error('目录不存在');
   }
+  // Linux 无头云端环境下无法打开本地客户机访达
+  if (process.platform === 'linux') {
+    throw new Error('当前为云端公网运行模式，无法直接打开您本地 Mac 的文件夹。请点击【保存到本地】直接下载视频文件。');
+  }
   const [cmd, args] =
     process.platform === 'win32'
       ? ['explorer', [normalized]]
