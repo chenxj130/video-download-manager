@@ -1,12 +1,36 @@
+import type React from 'react';
 import type { SVGProps } from 'react';
 
-type IconName =
-  | 'home' | 'tasks' | 'history' | 'dashboard' | 'settings'
-  | 'sun' | 'moon' | 'plus' | 'pause' | 'play'
-  | 'close' | 'retry' | 'trash' | 'folder' | 'search' | 'wrench'
-  | 'check' | 'alert' | 'drag' | 'wifi' | 'link' | 'chip' | 'gauge' | 'database' | 'disk' | 'radar' | 'download';
+export type IconName =
+  | 'home'
+  | 'tasks'
+  | 'history'
+  | 'dashboard'
+  | 'settings'
+  | 'sun'
+  | 'moon'
+  | 'plus'
+  | 'pause'
+  | 'play'
+  | 'close'
+  | 'retry'
+  | 'trash'
+  | 'folder'
+  | 'search'
+  | 'wrench'
+  | 'check'
+  | 'alert'
+  | 'drag'
+  | 'wifi'
+  | 'link'
+  | 'chip'
+  | 'gauge'
+  | 'database'
+  | 'disk'
+  | 'radar'
+  | 'download';
 
-const paths: Record<IconName, JSX.Element> = {
+const paths: Record<IconName, React.ReactNode> = {
   home: <path d="M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5" />,
   tasks: <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16" />,
   download: <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16" />,
@@ -69,5 +93,3 @@ export function Icon({
     </svg>
   );
 }
-
-export type { IconName };
