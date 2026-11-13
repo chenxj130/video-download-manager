@@ -61,8 +61,17 @@ export class YtDlpEngine implements VideoEngine {
       proc.stderr.on('data', (d) => (err += d.toString()));
       proc.on('error', (e) => reject(e));
       proc.on('close', (code) => {
-        if (code === 0) resolve(out);
-        else reject(new Error(err || `yt-dlp exited ${code}`));
+        if (code === 0) {
+          resolve(out);
+        } else {
+          // 过滤掉 stderr 里的非致命警告（如 Deprecated / WARNING），提取核心错误行
+          const cleanErr = err
+            .split('\n')
+            .map((l) => l.trim())
+            .filter((l) => l && !l.startsWith('Deprecated Feature:') && !l.startsWith('WARNING:'))
+            .join(' ');
+          reject(new Error(cleanErr || err || `yt-dlp exited ${code}`));
+        }
       });
     });
   }
