@@ -116,7 +116,12 @@ router.post(
     if (!isPathAllowed(dir)) {
       throw new ApiError('ACCESS_DENIED', '不允许打开该目录', 403);
     }
-    await openFolder(dir);
+    try {
+      await openFolder(dir);
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError('ACCESS_DENIED', (err as Error).message, 400);
+    }
     res.json({ ok: true });
   })
 );
