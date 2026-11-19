@@ -64,6 +64,12 @@ export const config = {
   cookiesFromBrowser: (process.env.YTDLP_COOKIES_FROM_BROWSER ?? '').trim(),
   cookiesFile: (process.env.YTDLP_COOKIES ?? '').trim(),
   /**
+   * 透传给 yt-dlp 的代理地址（支持 http://、https://、socks5:// 等）。
+   * 用于突破云服务器位于国内时访问 X/Twitter、YouTube、TikTok 等海外平台的网络限制。
+   * 留空 = 不使用代理（走直连）。
+   */
+  proxy: (process.env.YTDLP_PROXY ?? process.env.HTTPS_PROXY ?? process.env.HTTP_PROXY ?? '').trim(),
+  /**
    * 额外允许的保存/读取目录（逗号分隔的绝对路径）。默认仅 config.downloadDir。
    * 用于替代「把用户提交的 saveDir 直接加入白名单」这一越权读漏洞的显式授权通道。
    */
