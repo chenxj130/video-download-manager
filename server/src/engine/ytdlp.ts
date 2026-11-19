@@ -48,6 +48,14 @@ function cookieArgs(): string[] {
   return [];
 }
 
+/**
+ * 构造代理参数。仅当显式配置了 proxy 时才附加 '--proxy' 参数；否则返回 []。
+ */
+function proxyArgs(): string[] {
+  if (config.proxy) return ['--proxy', config.proxy];
+  return [];
+}
+
 /** 仅当系统已安装 yt-dlp + ffmpeg 时使用的真实下载引擎 */
 export class YtDlpEngine implements VideoEngine {
   name = 'ytdlp';
@@ -79,7 +87,7 @@ export class YtDlpEngine implements VideoEngine {
   async parse(url: string): Promise<VideoMetadata> {
     let raw: string;
     try {
-      raw = await this.exec([...cookieArgs(), '-J', '--no-warnings', url]);
+      raw = await this.exec([...proxyArgs(), ...cookieArgs(), '-J', '--no-warnings', url]);
     } catch (e) {
       const mapped = mapEngineError(e);
       throw new ApiError(mapped.code, mapped.message, mapped.code === 'VIDEO_NOT_FOUND' ? 404 : 400);
@@ -259,6 +267,7 @@ class YtDlpDownload implements DownloadHandle {
         '--hls-prefer-ffmpeg',
         '--progress-template',
         'download:__VDM__ %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s %(progress.speed)s %(progress.eta)s',
+        ...proxyArgs(),
         ...cookieArgs(),
         task.url,
       ];
@@ -298,6 +307,7 @@ class YtDlpDownload implements DownloadHandle {
       '--progress-template',
       'download:__VDM__ %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s %(progress.speed)s %(progress.eta)s',
       // 与 parse / 音频抽取分支一致：注入登录 cookie，才有资格命中 B 站 1080p+ 等登录档流。
+      ...proxyArgs(),
       ...cookieArgs(),
       task.url,
     ];
